@@ -5,10 +5,15 @@ android {
     buildToolsVersion "26.0.2"
 
     defaultConfig {
-        applicationId "com.jpgcookbook.baker"
+        applicationId "com.sony.jpgcookbook"
         minSdkVersion 9
         targetSdkVersion 25
         versionCode 1
         versionName "1.0"
     }
+}
+
+dependencies {
+    // This connects the 'app' to the 'lib' brain
+    compile project(':lib')
 }
