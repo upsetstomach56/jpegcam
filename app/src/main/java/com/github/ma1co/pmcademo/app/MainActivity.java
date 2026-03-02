@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.util.Pair; 
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -82,7 +83,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     if (files != null) {
                         for (File f : files) {
                             String name = f.getName();
-                            if (name.toUpperCase().endsWith(".JPG") && !name.startsWith("COOKED_") && !knownFiles.contains(name)) {
+                            if (name.toUpperCase().endsWith(".JPG") && !name.startsWith("COOKED_") && !name.startsWith("TINY_") && !knownFiles.contains(name)) {
                                 knownFiles.add(name);
                                 new BakeTask(name).execute();
                                 break; 
@@ -136,34 +137,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("TINY BAKE (PROOF OF CONCEPT)...");
+            tvRecipe.setText("TINY BAKE (1MP PROOF)...");
             tvRecipe.setTextColor(Color.RED);
+            System.gc();
         }
 
         @Override protected Boolean doInBackground(Void... voids) {
             try {
-                // DON'T release hardware yet, just try a tiny 1MP image
+                Thread.sleep(1000);
                 File lutFile = new File("/sdcard/LUTS/" + recipeList.get(recipeIndex));
                 CubeLUT lut = new CubeLUT(lutFile);
                 File original = new File(SONY_PATH, fileName);
 
                 BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inSampleSize = 8; // ULTRA TINY (1MP) - Use almost zero RAM
+                opt.inSampleSize = 8; // 1MP to test if Manifest change worked
                 opt.inPreferredConfig = Bitmap.Config.RGB_565;
                 opt.inMutable = true;
                 
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp != null) {
-                    for (int y = 0; y < bmp.getHeight(); y++) {
-                        for (int x = 0; x < bmp.getWidth(); x++) {
-                            bmp.setPixel(x, y, lut.mapColor(bmp.getPixel(x, y)));
-                        }
+                    int w = bmp.getWidth();
+                    int h = bmp.getHeight();
+                    int[] row = new int[w];
+                    for (int y = 0; y < h; y++) {
+                        bmp.getPixels(row, 0, w, 0, y, w, 1);
+                        for (int x = 0; x < w; x++) { row[x] = lut.mapColor(row[x]); }
+                        bmp.setPixels(row, 0, w, 0, y, w, 1);
                     }
                     File cooked = new File(SONY_PATH, "TINY_" + fileName);
                     FileOutputStream fos = new FileOutputStream(cooked);
                     bmp.compress(Bitmap.CompressFormat.JPEG, 80, fos);
                     fos.close();
                     bmp.recycle();
+                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
                     return true;
                 }
             } catch (Exception e) {}
@@ -177,7 +183,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- STANDARD CAMERA METHODS ---
     private void reopenCamera() {
         try {
             mCameraEx = CameraEx.open(0, null);
@@ -194,6 +199,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     @Override protected void onResume() { super.onResume(); reopenCamera(); sendSonyBroadcast(true); }
+
     private void syncUI() {
         if (mCamera == null) return;
         try {
@@ -203,10 +209,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (speed.first == 1 && speed.second != 1) tvShutter.setText(speed.first + "/" + speed.second);
             else tvShutter.setText(speed.first + "\"");
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
-            tvISO.setText("ISO " + pm.getISOSensitivity());
+            tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
             tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         } catch (Exception e) {}
     }
+
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
         if (scanCode == ScalarInput.ISV_KEY_DELETE) { exitApp(); return true; }
@@ -215,18 +222,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
         return super.onKeyDown(keyCode, event);
     }
+
     private void handleInput(int delta) {
         if (mCameraEx == null || isBaking) return;
         try {
             Camera.Parameters p = mCamera.getParameters();
             if (mDialMode == DialMode.shutter) { if (delta > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
             else if (mDialMode == DialMode.aperture) { if (delta > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
-            else if (mDialMode == DialMode.recipe) { recipeIndex = (recipeIndex + delta + recipeList.size()) % recipeList.size(); updateRecipeDisplay(); }
+            else if (mDialMode == DialMode.iso) {
+                int idx = supportedIsos.indexOf(curIso);
+                int next = Math.max(0, Math.min(supportedIsos.size() - 1, idx + delta));
+                curIso = supportedIsos.get(next);
+                CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
+                pm.setISOSensitivity(curIso);
+                mCamera.setParameters(p);
+            } else if (mDialMode == DialMode.exposure) {
+                curExpComp = Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), curExpComp + delta));
+                p.setExposureCompensation(curExpComp);
+                mCamera.setParameters(p);
+            } else if (mDialMode == DialMode.recipe) { recipeIndex = (recipeIndex + delta + recipeList.size()) % recipeList.size(); updateRecipeDisplay(); }
             syncUI();
         } catch (Exception e) {}
     }
+
     private void cycleMode() { if (isBaking) return; DialMode[] modes = DialMode.values(); int next = (mDialMode.ordinal() + 1) % modes.length; setDialMode(modes[next]); }
-    private void setDialMode(DialMode mode) { mDialMode = mode; tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); updateRecipeDisplay(); }
+    private void setDialMode(DialMode mode) { mDialMode = mode; tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); tvISO.setTextColor(mode == DialMode.iso ? Color.GREEN : Color.WHITE); tvExposure.setTextColor(mode == DialMode.exposure ? Color.GREEN : Color.WHITE); updateRecipeDisplay(); }
     private void scanRecipes() { recipeList.clear(); recipeList.add("NONE (DEFAULT)"); File lutDir = new File("/sdcard/LUTS"); if (lutDir.exists()) { File[] files = lutDir.listFiles(); if (files != null) { for (File f : files) { if (!f.getName().startsWith("_") && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName()); } } } updateRecipeDisplay(); }
     private void updateRecipeDisplay() { String name = recipeList.get(recipeIndex); String display = name.split("\\.")[0].toUpperCase(); tvRecipe.setText("<  " + display + "  >"); tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE); }
     private void sendSonyBroadcast(boolean active) { Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); intent.putExtra("package_name", getPackageName()); intent.putExtra("resume_key", active ? new String[]{"on"} : new String[]{}); sendBroadcast(intent); }
