@@ -27,6 +27,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private Camera mCamera;
     private SurfaceView mSurfaceView;
     private TextView tvShutter, tvAperture, tvISO, tvExposure, tvRecipe;
+    
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     private boolean isBaking = false;
@@ -57,15 +58,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(DialMode.shutter);
     }
 
-    private class FinalMirrorTask extends AsyncTask<Void, Void, String> {
+    private class BakeTask extends AsyncTask<Void, Void, String> {
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("BAKING (8.3 MODE)...");
+            String recipeName = recipeList.get(recipeIndex);
+            tvRecipe.setText(recipeIndex == 0 ? "COPYING..." : "COOKING " + recipeName + "...");
             tvRecipe.setTextColor(Color.YELLOW);
         }
 
         @Override protected String doInBackground(Void... voids) {
             try {
+                // 1. Locate the source image
                 File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
                 File sonyDir = new File(dcim, "100MSDCF");
                 if (!sonyDir.exists()) return "ERR: NO 100MSDCF";
@@ -87,21 +90,43 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 if (original == null) return "ERR: NO JPG";
 
+                // 2. Decode original image
                 BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inSampleSize = 4;
+                opt.inSampleSize = 4; // Keeps memory safe
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp == null) return "ERR: DECODE FAIL";
 
+                // 3. APPLY THE LUT RECIPE
+                if (recipeIndex > 0) {
+                    File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+                    if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+                    
+                    File cubeFile = new File(lutDir, recipeList.get(recipeIndex));
+                    if (cubeFile.exists()) {
+                        LutCooker cooker = new LutCooker();
+                        if (cooker.loadLut(cubeFile)) {
+                            Bitmap newBmp = cooker.applyLut(bmp);
+                            bmp.recycle(); // Free old memory
+                            bmp = newBmp;  // Use cooked image
+                        } else {
+                            bmp.recycle();
+                            return "ERR: BAD LUT FILE";
+                        }
+                    } else {
+                        bmp.recycle();
+                        return "ERR: LUT NOT FOUND";
+                    }
+                }
+
+                // 4. Save to COOKED folder with 8.3 compliant name
                 File cookedDir = new File(dcim, "COOKED");
                 if (!cookedDir.exists()) cookedDir.mkdirs();
                 
-                // STRICT 8.3 FILENAME GENERATION
                 String origName = original.getName();
                 String numbers = origName.replaceAll("[^0-9]", "");
                 if (numbers.length() > 4) numbers = numbers.substring(numbers.length() - 4);
                 while (numbers.length() < 4) numbers = "0" + numbers;
                 
-                // Format: CKEDxxxx.JPG (Exactly 8 characters + extension)
                 String newName = "CKED" + numbers + ".JPG";
                 File outFile = new File(cookedDir, newName);
 
@@ -129,7 +154,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
         if (scanCode == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
-        if (scanCode == ScalarInput.ISV_KEY_UP) { new FinalMirrorTask().execute(); return true; }
+        if (scanCode == ScalarInput.ISV_KEY_UP) { new BakeTask().execute(); return true; }
         if (!isBaking) {
             if (scanCode == ScalarInput.ISV_KEY_DOWN) { cycleMode(); return true; }
             if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
@@ -188,12 +213,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvExposure.setTextColor(m == DialMode.exposure ? Color.GREEN : Color.WHITE);
         updateRecipeDisplay(); 
     }
-    private void scanRecipes() { recipeList.clear(); recipeList.add("NONE"); updateRecipeDisplay(); }
+    
+    private void scanRecipes() { 
+        recipeList.clear(); 
+        recipeList.add("NONE"); 
+        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+        if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+        
+        if (lutDir.exists() && lutDir.listFiles() != null) {
+            for (File f : lutDir.listFiles()) {
+                String name = f.getName().toUpperCase();
+                if (name.contains("CUB")) recipeList.add(f.getName());
+            }
+        }
+        updateRecipeDisplay(); 
+    }
+    
     private void updateRecipeDisplay() { 
         String name = recipeList.get(recipeIndex);
         tvRecipe.setText("< " + name.toUpperCase() + " >");
         tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE);
     }
+    
     @Override public void surfaceCreated(SurfaceHolder h) { 
         try { 
             mCameraEx = CameraEx.open(0, null);
