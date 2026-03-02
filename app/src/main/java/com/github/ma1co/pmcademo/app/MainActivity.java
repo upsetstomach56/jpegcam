@@ -2,10 +2,9 @@ package com.github.ma1co.pmcademo.app;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Color;
+import android.graphics.*;
 import android.hardware.Camera;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.FileObserver;
@@ -16,10 +15,7 @@ import android.view.SurfaceView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileReader;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -33,11 +29,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     private FileObserver dcimObserver;
-    
-    private List<Integer> supportedIsos;
-    private int curIso;
-    private int curExpComp;
-    private float expStep;
+    private final String SONY_PATH = "/sdcard/DCIM/100MSDCF";
 
     enum DialMode { shutter, aperture, iso, exposure, recipe }
     private DialMode mDialMode = DialMode.shutter;
@@ -61,9 +53,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(DialMode.shutter);
     }
 
-    // --- LUT ENGINE START ---
+    // --- HIGH-PERFORMANCE LUT ENGINE ---
     private class CubeLUT {
-        int size;
+        int size = 0;
         float[] data;
 
         CubeLUT(File file) {
@@ -72,15 +64,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 String line;
                 int idx = 0;
                 while ((line = br.readLine()) != null) {
+                    line = line.trim();
                     if (line.startsWith("LUT_3D_SIZE")) {
-                        size = Integer.parseInt(line.split(" ")[1]);
+                        size = Integer.parseInt(line.split("\\s+")[1]);
                         data = new float[size * size * size * 3];
                     } else if (line.length() > 0 && Character.isDigit(line.charAt(0))) {
-                        String[] parts = line.split("\\s+");
-                        if (parts.length >= 3) {
-                            data[idx++] = Float.parseFloat(parts[0]);
-                            data[idx++] = Float.parseFloat(parts[1]);
-                            data[idx++] = Float.parseFloat(parts[2]);
+                        String[] p = line.split("\\s+");
+                        if (p.length >= 3) {
+                            data[idx++] = Float.parseFloat(p[0]);
+                            data[idx++] = Float.parseFloat(p[1]);
+                            data[idx++] = Float.parseFloat(p[2]);
                         }
                     }
                 }
@@ -88,63 +81,69 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } catch (Exception e) {}
         }
 
-        int getColor(int r, int g, int b) {
-            float rf = (r / 255.0f) * (size - 1);
-            float gf = (g / 255.0f) * (size - 1);
-            float bf = (b / 255.0f) * (size - 1);
-            int ri = (int)rf; int gi = (int)gf; int bi = (int)bf;
-            int offset = (ri + size * (gi + size * bi)) * 3;
+        int mapColor(int color) {
+            if (size == 0) return color;
+            float r = (Color.red(color) / 255.0f) * (size - 1);
+            float g = (Color.green(color) / 255.0f) * (size - 1);
+            float b = (Color.blue(color) / 255.0f) * (size - 1);
+            
+            int x = (int)r; int y = (int)g; int z = (int)b;
+            int offset = (x + size * (y + size * z)) * 3;
             return Color.rgb((int)(data[offset]*255), (int)(data[offset+1]*255), (int)(data[offset+2]*255));
         }
     }
-    // --- LUT ENGINE END ---
 
-    private class BakeTask extends AsyncTask<Void, String, Boolean> {
+    private class BakeTask extends AsyncTask<Void, Void, Boolean> {
         String fileName;
         BakeTask(String name) { this.fileName = name; }
 
-        @Override
-        protected void onPreExecute() {
-            tvRecipe.setText("COOKING: " + fileName.toUpperCase());
+        @Override protected void onPreExecute() {
+            tvRecipe.setText("BAKING: " + fileName);
             tvRecipe.setTextColor(Color.RED);
         }
 
-        @Override
-        protected Boolean doInBackground(Void... voids) {
+        @Override protected Boolean doInBackground(Void... voids) {
             try {
                 File lutFile = new File("/sdcard/LUTS/" + recipeList.get(recipeIndex));
                 CubeLUT lut = new CubeLUT(lutFile);
+                File original = new File(SONY_PATH, fileName);
                 
-                File imgFile = new File("/sdcard/DCIM/100MSDCF/" + fileName);
-                Bitmap bmp = BitmapFactory.decodeFile(imgFile.getAbsolutePath());
-                if (bmp == null) return false;
-
-                Bitmap out = bmp.copy(Bitmap.Config.ARGB_8888, true);
-                for (int y = 0; y < out.getHeight(); y++) {
-                    for (int x = 0; x < out.getWidth(); x++) {
-                        int p = out.getPixel(x, y);
-                        out.setPixel(x, y, lut.getColor(Color.red(p), Color.green(p), Color.blue(p)));
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inMutable = true;
+                Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), options);
+                
+                if (bmp != null) {
+                    // Pixel processing loop
+                    int[] pixels = new int[bmp.getWidth() * bmp.getHeight()];
+                    bmp.getPixels(pixels, 0, bmp.getWidth(), 0, 0, bmp.getWidth(), bmp.getHeight());
+                    
+                    for (int i = 0; i < pixels.length; i++) {
+                        pixels[i] = lut.mapColor(pixels[i]);
                     }
+                    
+                    bmp.setPixels(pixels, 0, bmp.getWidth(), 0, 0, bmp.getWidth(), bmp.getHeight());
+                    
+                    File cooked = new File(SONY_PATH, "COOKED_" + fileName);
+                    FileOutputStream fos = new FileOutputStream(cooked);
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+                    fos.close();
+                    
+                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
+                    return true;
                 }
-
-                File outFile = new File("/sdcard/DCIM/100MSDCF/COOKED_" + fileName);
-                FileOutputStream fos = new FileOutputStream(outFile);
-                out.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                fos.close();
-                return true;
-            } catch (Exception e) { return false; }
+            } catch (Exception e) {}
+            return false;
         }
 
-        @Override
-        protected void onPostExecute(Boolean success) {
+        @Override protected void onPostExecute(Boolean success) {
             updateRecipeDisplay();
             setDialMode(mDialMode);
         }
     }
 
     private void setupObserver() {
-        String path = "/sdcard/DCIM/100MSDCF";
-        dcimObserver = new FileObserver(path, FileObserver.CLOSE_WRITE) {
+        if (dcimObserver != null) dcimObserver.stopWatching();
+        dcimObserver = new FileObserver(SONY_PATH, FileObserver.CLOSE_WRITE) {
             @Override
             public void onEvent(int event, final String file) {
                 if (file != null && file.toUpperCase().endsWith(".JPG") && !file.startsWith("COOKED_")) {
@@ -172,13 +171,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             m_pictureReviewTime = m_autoReviewControl.getPictureReviewTime();
             m_autoReviewControl.setPictureReviewTime(0);
 
-            Camera.Parameters p = mCamera.getParameters();
-            CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
-            supportedIsos = (List<Integer>) pm.getSupportedISOSensitivities();
-            curIso = pm.getISOSensitivity();
-            curExpComp = p.getExposureCompensation();
-            expStep = p.getExposureCompensationStep();
-
             mCameraEx.setShutterSpeedChangeListener(this);
             setupObserver();
             sendSonyBroadcast(true); 
@@ -195,8 +187,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (speed.first == 1 && speed.second != 1) tvShutter.setText(speed.first + "/" + speed.second);
             else tvShutter.setText(speed.first + "\"");
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
-            tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
-            tvExposure.setText(String.format("%.1f", curExpComp * expStep));
+            tvISO.setText("ISO " + pm.getISOSensitivity());
+            tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         } catch (Exception e) {}
     }
 
@@ -219,16 +211,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 if (delta > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
             } else if (mDialMode == DialMode.aperture) {
                 if (delta > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture();
-            } else if (mDialMode == DialMode.iso) {
-                int idx = supportedIsos.indexOf(curIso);
-                int next = Math.max(0, Math.min(supportedIsos.size() - 1, idx + delta));
-                curIso = supportedIsos.get(next);
-                pm.setISOSensitivity(curIso);
-                mCamera.setParameters(p);
-            } else if (mDialMode == DialMode.exposure) {
-                curExpComp = Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), curExpComp + delta));
-                p.setExposureCompensation(curExpComp);
-                mCamera.setParameters(p);
             } else if (mDialMode == DialMode.recipe) {
                 recipeIndex = (recipeIndex + delta + recipeList.size()) % recipeList.size();
                 updateRecipeDisplay();
