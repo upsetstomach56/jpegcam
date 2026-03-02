@@ -53,27 +53,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         recipeList.clear();
         recipeList.add("NONE (DEFAULT)");
 
-        // VERIFIED PATH: Using the exact "LUTS" folder name found in your root scan
+        // BRUTE FORCE SCAN: Target the verified LUTS folder
         File lutDir = new File("/sdcard/LUTS");
         
-        // Final fallback to lowercase if uppercase LUTS folder isn't found
-        if (!lutDir.exists()) lutDir = new File("/sdcard/LUTs");
-
         if (lutDir.exists() && lutDir.isDirectory()) {
             File[] files = lutDir.listFiles();
-            if (files != null) {
+            if (files != null && files.length > 0) {
                 for (File f : files) {
                     String n = f.getName().toUpperCase();
-                    // Checking for common LUT extensions
-                    if (n.endsWith(".CUBE") || n.endsWith(".PNG")) {
+                    // BROAD SEARCH: Check if the name contains "CUB" or "PNG" at all
+                    if (n.contains("CUB") || n.contains("PNG")) {
                         recipeList.add(f.getName());
                     }
                 }
+            } else if (files != null) {
+                tvRecipe.setText("LUTS FOLDER IS LITERALLY EMPTY");
             }
+        } else {
+            tvRecipe.setText("LUTS FOLDER GONE AGAIN");
         }
 
-        if (recipeList.size() <= 1) {
-            tvRecipe.setText("LUTS FOLDER EMPTY");
+        if (recipeList.size() <= 1 && recipeList.get(0).equals("NONE (DEFAULT)")) {
+            // DEBUG: If no recipes found, list the first 3 things found in /sdcard/LUTS
+            String items = "";
+            String[] list = lutDir.list();
+            if (list != null) {
+                for (int i=0; i < Math.min(list.length, 3); i++) items += list[i] + " ";
+                tvRecipe.setText("FOUND IN LUTS: " + items);
+            }
         } else {
             updateRecipeDisplay();
         }
@@ -106,11 +113,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
-            
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
             if (speed.first >= speed.second) tvShutter.setText((speed.first / speed.second) + "\"");
             else tvShutter.setText(speed.first + "/" + speed.second);
-            
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
             tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
             tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
