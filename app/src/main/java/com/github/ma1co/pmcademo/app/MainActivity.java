@@ -49,6 +49,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         mSurfaceView = (SurfaceView) findViewById(R.id.surfaceView);
         mSurfaceView.getHolder().addCallback(this);
+        // CRITICAL LEGACY LINE: Required for a5100 viewfinder to work
+        mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
         tvShutter = (TextView) findViewById(R.id.tvShutter);
         tvAperture = (TextView) findViewById(R.id.tvAperture);
@@ -56,46 +58,50 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         tvRecipe = (TextView) findViewById(R.id.tvRecipe);
         
-        findActiveDcimPath();
-        initializeFileLibrary();
         scanRecipes();
         setDialMode(DialMode.shutter);
     }
 
     private void findActiveDcimPath() {
-        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
-        if (dcim.exists() && dcim.isDirectory()) {
-            File[] folders = dcim.listFiles();
-            ArrayList<String> sonyFolders = new ArrayList<String>();
-            if (folders != null) {
-                for (File f : folders) {
-                    if (f.getName().endsWith("MSDCF")) sonyFolders.add(f.getAbsolutePath());
+        try {
+            File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
+            if (dcim.exists() && dcim.isDirectory()) {
+                File[] folders = dcim.listFiles();
+                ArrayList<String> sonyFolders = new ArrayList<String>();
+                if (folders != null) {
+                    for (File f : folders) {
+                        if (f.getName().endsWith("MSDCF")) sonyFolders.add(f.getAbsolutePath());
+                    }
+                }
+                if (!sonyFolders.isEmpty()) {
+                    Collections.sort(sonyFolders);
+                    currentDcimPath = sonyFolders.get(sonyFolders.size() - 1);
+                    initializeFileLibrary();
+                    return;
                 }
             }
-            if (!sonyFolders.isEmpty()) {
-                Collections.sort(sonyFolders);
-                currentDcimPath = sonyFolders.get(sonyFolders.size() - 1);
-                return;
-            }
-        }
+        } catch (Exception e) {}
         currentDcimPath = "/sdcard/DCIM/100MSDCF";
+        initializeFileLibrary();
     }
 
     private void initializeFileLibrary() {
-        if (currentDcimPath.isEmpty()) return;
         File dir = new File(currentDcimPath);
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File f : files) knownFiles.add(f.getName());
+        if (dir.exists()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                for (File f : files) knownFiles.add(f.getName());
+            }
         }
         startHunterLoop();
     }
 
     private void startHunterLoop() {
+        m_handler.removeCallbacksAndMessages(null);
         m_handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (!isBaking && recipeIndex > 0) {
+                if (!isBaking && recipeIndex > 0 && !currentDcimPath.isEmpty()) {
                     File dir = new File(currentDcimPath);
                     File[] files = dir.listFiles();
                     if (files != null) {
@@ -127,15 +133,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected Boolean doInBackground(Void... voids) {
             File original = new File(currentDcimPath, fileName);
             Bitmap bmp = null;
-            
-            // INFINITE LOOP (With Safety Exit): Poll until the file is readable
             int attempts = 0;
-            while (bmp == null && attempts < 15) { // Try for up to 30 seconds
+            // Poll for up to 40 seconds to wait out the Sony Database Lock
+            while (bmp == null && attempts < 20) { 
                 try {
                     Thread.sleep(2000);
-                    BitmapFactory.Options opt = new BitmapFactory.Options();
-                    opt.inSampleSize = 4; // 4MP is the stability sweet spot
-                    bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
+                    if (original.exists()) {
+                        BitmapFactory.Options opt = new BitmapFactory.Options();
+                        opt.inSampleSize = 4; 
+                        bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
+                        if (bmp != null) break; 
+                    }
                     attempts++;
                 } catch (Exception e) {}
             }
@@ -164,14 +172,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvRecipe.setTextColor(Color.RED);
             }
             m_handler.postDelayed(new Runnable() {
-                @Override public void run() { updateRecipeDisplay(); setDialMode(mDialMode); }
+                @Override public void run() { updateRecipeDisplay(); }
             }, 3000);
         }
     }
 
-    // --- VIEWFIX: KEEP PREVIEW ALIVE ---
     private void reopenCamera() {
         try {
+            if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; }
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
@@ -184,6 +192,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             mCamera.setPreviewDisplay(mSurfaceView.getHolder());
             mCamera.startPreview();
             syncUI();
+            
+            // Kick off path discovery AFTER camera is visible
+            findActiveDcimPath();
         } catch (Exception e) {}
     }
 
@@ -230,7 +241,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void exitApp() { m_handler.removeCallbacksAndMessages(null); Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); intent.putExtra("package_name", getPackageName()); intent.putExtra("class_name", getClass().getName()); intent.putExtra("pullingback_key", new String[] {}); intent.putExtra("resume_key", new String[] {}); sendBroadcast(intent); finish(); }
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo info, CameraEx camera) { syncUI(); }
     @Override public void surfaceCreated(SurfaceHolder h) { try { if (mCamera != null) { mCamera.setPreviewDisplay(h); mCamera.startPreview(); syncUI(); } } catch (Exception e) {} }
-    @Override protected void onPause() { super.onPause(); if (mCameraEx != null) { m_autoReviewControl.setPictureReviewTime(m_pictureReviewTime); mCameraEx.release(); } }
+    @Override protected void onPause() { super.onPause(); m_handler.removeCallbacksAndMessages(null); if (mCameraEx != null) { m_autoReviewControl.setPictureReviewTime(m_pictureReviewTime); mCameraEx.release(); } }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
 }
