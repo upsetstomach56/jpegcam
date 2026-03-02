@@ -5,7 +5,7 @@ android {
     buildToolsVersion "26.0.2"
 
     defaultConfig {
-        applicationId "com.sony.jpgcookbook"
+        applicationId "com.jpgcookbook.sony"
         minSdkVersion 9
         targetSdkVersion 25
         versionCode 1
@@ -14,8 +14,11 @@ android {
 
     sourceSets {
         main {
-            // This is the key: we tell it the camera brain is in the 'stubs' folder
+            // This tells the compiler to look in the 'stubs' folder for the Sony code
             java.srcDirs = ['src/main/java', 'src/main/stubs']
         }
     }
 }
+
+// No dependencies needed for the stubs method!
+dependencies {}

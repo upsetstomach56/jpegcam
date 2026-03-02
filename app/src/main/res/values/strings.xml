@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">JPG Cookbook</string>
+    <string name="app_name">Sony JPGCookbook/string>
     <string name="title_activity_main">JPG Cookbook</string>
     <string name="title_activity_key_event">Key events</string>
     <string name="title_activity_property">Properties</string>
