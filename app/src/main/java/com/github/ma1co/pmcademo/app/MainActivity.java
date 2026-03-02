@@ -1,6 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R;
+import com.jpgcookbook.sony.R; // This links the logic to the identity
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.*;
@@ -34,7 +34,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
-    private int qualityIndex = 0; 
+    private int qualityIndex = 0; // 0 = 1.5MP, 1 = 6.0MP
     
     private boolean isProcessing = false;
     private boolean isReady = false; 
@@ -65,6 +65,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
         
+        // STATUS UI (Top Left)
         tvStatus = new TextView(this);
         tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
@@ -74,6 +75,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         statusParams.setMargins(30, 80, 0, 0);
         contentRoot.addView(tvStatus, statusParams);
 
+        // QUALITY UI (Top Right)
         tvQuality = new TextView(this);
         tvQuality.setText("SIZE: PROXY (1.5MP)");
         tvQuality.setTextColor(Color.LTGRAY);
@@ -95,10 +97,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
             android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
+            
             String[] tags = new String[] {
                 "FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", 
                 "DateTime", "Make", "Model", "WhiteBalance", "Flash"
             };
+
             for (String tag : tags) {
                 String value = sourceExif.getAttribute(tag);
                 if (value != null) {
@@ -271,6 +275,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 fos.close();
                 finalBmp.recycle();
 
+                // Copy EXIF
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
@@ -405,6 +410,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onResume() { 
         super.onResume(); 
         if (mCamera != null) syncUI(); 
+        // Force an initial scan to prime the "last photo" time
+        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
+        File sonyDir = new File(dcim, "100MSDCF");
+        if (sonyDir.exists() && sonyDir.listFiles() != null) {
+            for (File f : sonyDir.listFiles()) {
+                if (f.lastModified() > lastNewestFileTime) lastNewestFileTime = f.lastModified();
+            }
+        }
         startAutoProcessPolling(); 
     }
     
