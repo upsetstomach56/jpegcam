@@ -14,11 +14,12 @@ android {
 
     sourceSets {
         main {
-            // This tells the compiler to look in the 'stubs' folder for the Sony code
+            // This is the fix: include the local stubs folder
             java.srcDirs = ['src/main/java', 'src/main/stubs']
         }
     }
 }
 
-// No dependencies needed for the stubs method!
-dependencies {}
+dependencies {
+    // No external libraries needed with the stubs method
+}
