@@ -89,14 +89,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 if (original == null) return "ERR: NO JPG";
 
-                // CRITICAL MEMORY FIX: inMutable = true allows us to edit the image without copying it
+                // 1. Load image cleanly (NO inMutable flag)
                 BitmapFactory.Options opt = new BitmapFactory.Options();
                 opt.inSampleSize = 4;
-                opt.inMutable = true; 
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp == null) return "ERR: DECODE FAIL";
 
-                // APPLY THE LUT RECIPE IN-PLACE
+                // 2. Extract pixels
+                int width = bmp.getWidth();
+                int height = bmp.getHeight();
+                int[] pixels = new int[width * height];
+                bmp.getPixels(pixels, 0, width, 0, 0, width, height);
+
+                // 3. IMMEDIATELY TRASH THE ORIGINAL IMAGE TO FREE MEMORY
+                bmp.recycle();
+                bmp = null;
+
+                // 4. Cook the raw pixels
                 if (recipeIndex > 0) {
                     File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
                     if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
@@ -105,17 +114,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     if (cubeFile.exists()) {
                         LutCooker cooker = new LutCooker();
                         if (cooker.loadLut(cubeFile)) {
-                            cooker.applyLutInPlace(bmp); // Modifies 'bmp' directly!
+                            cooker.applyLutToPixels(pixels); 
                         } else {
-                            bmp.recycle();
                             return "ERR: BAD LUT FILE";
                         }
                     } else {
-                        bmp.recycle();
                         return "ERR: LUT NOT FOUND";
                     }
                 }
 
+                // 5. Build final image from the cooked pixels
+                Bitmap cookedBmp = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+                pixels = null; // Free array memory
+
+                // 6. Save
                 File cookedDir = new File(dcim, "COOKED");
                 if (!cookedDir.exists()) cookedDir.mkdirs();
                 
@@ -128,15 +140,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File outFile = new File(cookedDir, newName);
 
                 FileOutputStream fos = new FileOutputStream(outFile);
-                bmp.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                cookedBmp.compress(Bitmap.CompressFormat.JPEG, 90, fos);
                 fos.flush();
                 fos.close();
-                bmp.recycle(); // Free memory immediately after saving
+                
+                cookedBmp.recycle(); // Done!
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                 return "SUCCESS: " + newName;
-            } catch (Exception e) {
-                return "ERR: " + e.getMessage();
+                
+            } catch (OutOfMemoryError oom) {
+                return "ERR: OUT OF MEMORY";
+            } catch (Throwable t) { // Catch absolutely everything, including native hardware crashes
+                return "CRASH: " + t.getMessage();
             }
         }
 

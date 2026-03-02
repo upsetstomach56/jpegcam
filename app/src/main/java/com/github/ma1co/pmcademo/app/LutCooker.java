@@ -1,6 +1,5 @@
 package com.github.ma1co.pmcademo.app;
 
-import android.graphics.Bitmap;
 import android.graphics.Color;
 import java.io.BufferedReader;
 import java.io.File;
@@ -60,38 +59,25 @@ public class LutCooker {
         return false;
     }
 
-    // MEMORY SAFE: Overwrites the image row-by-row
-    public void applyLutInPlace(Bitmap bitmap) {
-        if (lutPixels == null || lutSize == 0 || bitmap == null) return;
+    // THE RELAY: Modifies the raw integer array in place
+    public void applyLutToPixels(int[] pixels) {
+        if (lutPixels == null || lutSize == 0 || pixels == null) return;
 
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        
-        // Only allocate memory for ONE horizontal row of pixels (~8 Kilobytes)
-        int[] rowPixels = new int[width];
+        for (int i = 0; i < pixels.length; i++) {
+            int pixel = pixels[i];
+            int r = Color.red(pixel);
+            int g = Color.green(pixel);
+            int b = Color.blue(pixel);
 
-        for (int y = 0; y < height; y++) {
-            // Read one row
-            bitmap.getPixels(rowPixels, 0, width, 0, y, width, 1);
-            
-            for (int x = 0; x < width; x++) {
-                int pixel = rowPixels[x];
-                int r = Color.red(pixel);
-                int g = Color.green(pixel);
-                int b = Color.blue(pixel);
+            int lutX = (r * (lutSize - 1)) / 255;
+            int lutY = (g * (lutSize - 1)) / 255;
+            int lutZ = (b * (lutSize - 1)) / 255;
 
-                int lutX = (r * (lutSize - 1)) / 255;
-                int lutY = (g * (lutSize - 1)) / 255;
-                int lutZ = (b * (lutSize - 1)) / 255;
+            int lutIndex = lutX + (lutY * lutSize) + (lutZ * lutSize * lutSize);
 
-                int lutIndex = lutX + (lutY * lutSize) + (lutZ * lutSize * lutSize);
-
-                if (lutIndex >= 0 && lutIndex < lutPixels.length) {
-                    rowPixels[x] = lutPixels[lutIndex];
-                }
+            if (lutIndex >= 0 && lutIndex < lutPixels.length) {
+                pixels[i] = lutPixels[lutIndex];
             }
-            // Write the row back into the original image
-            bitmap.setPixels(rowPixels, 0, width, 0, y, width, 1);
         }
     }
 }
