@@ -47,7 +47,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private long lastNewestFileTime = 0;
 
     public enum DialMode { shutter, aperture, iso, exposure, recipe, quality }
-    // Starts on Recipe by default
     private DialMode mDialMode = DialMode.recipe;
 
     @Override
@@ -67,13 +66,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
         
+        // MOVED UI TO TOP OF SCREEN TO AVOID OVERLAP
         tvStatus = new TextView(this);
         tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
         tvStatus.setTextSize(18); 
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT);
-        statusParams.setMargins(30, 0, 0, 30);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT);
+        statusParams.setMargins(30, 80, 0, 0); // Pushed down slightly from very top
         contentRoot.addView(tvStatus, statusParams);
 
         tvQuality = new TextView(this);
@@ -81,8 +81,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvQuality.setTextColor(Color.LTGRAY);
         tvQuality.setTextSize(18); 
         FrameLayout.LayoutParams qualityParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.RIGHT);
-        qualityParams.setMargins(0, 0, 30, 30);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
+        qualityParams.setMargins(0, 80, 30, 0);
         contentRoot.addView(tvQuality, qualityParams);
         
         ViewGroup root = (ViewGroup) ((ViewGroup) this.findViewById(android.R.id.content)).getChildAt(0);
@@ -253,14 +253,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 decoder.recycle();
 
-                // DEDICATED ROOT PROCESSED FOLDER
+                // 8.3 FILENAME FIX: Creating "GRADED" directory on the root (6 chars, safe for FAT32)
                 File rootDir = Environment.getExternalStorageDirectory();
-                File processedDir = new File(rootDir, "PROCESSED");
+                File processedDir = new File(rootDir, "GRADED");
                 if (!processedDir.exists()) {
                     processedDir.mkdirs();
                 }
                 
-                // EXACT ORIGINAL FILE NAME
+                // EXACT ORIGINAL FILENAME NO PREFIX
                 String newName = original.getName();
                 File outFile = new File(processedDir, newName);
 
@@ -271,7 +271,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 finalBmp.recycle();
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
-                return "SUCCESS: " + newName;
+                return "SUCCESS: SAVED";
                 
             } catch (OutOfMemoryError oom) {
                 return "ERR: OUT OF MEMORY";
