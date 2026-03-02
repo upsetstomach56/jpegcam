@@ -10,10 +10,12 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.FileObserver;
 import android.util.Pair;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -33,11 +35,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     
-    // 0 = 1.5MP Proxy, 1 = 6.0MP High
     private int qualityIndex = 0; 
     
     private boolean isProcessing = false;
-    private boolean isReady = false; // Prevents shooting while parsing
+    private boolean isReady = false; 
     
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
@@ -45,9 +46,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
 
-    // ADDED QUALITY TO THE MENU
     public enum DialMode { shutter, aperture, iso, exposure, recipe, quality }
-    private DialMode mDialMode = DialMode.shutter;
+    private DialMode mDialMode = DialMode.recipe;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,26 +64,32 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         tvRecipe = (TextView) findViewById(R.id.tvRecipe);
         
-        ViewGroup layout = (ViewGroup) tvRecipe.getParent();
+        ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
+        
         tvStatus = new TextView(this);
         tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
         tvStatus.setTextSize(18); 
-        tvStatus.setPadding(0, 10, 0, 0);
-        layout.addView(tvStatus);
+        FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT);
+        statusParams.setMargins(30, 0, 0, 30);
+        contentRoot.addView(tvStatus, statusParams);
 
         tvQuality = new TextView(this);
         tvQuality.setText("SIZE: PROXY (1.5MP)");
         tvQuality.setTextColor(Color.LTGRAY);
         tvQuality.setTextSize(18); 
-        layout.addView(tvQuality);
+        FrameLayout.LayoutParams qualityParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.RIGHT);
+        qualityParams.setMargins(0, 0, 30, 30);
+        contentRoot.addView(tvQuality, qualityParams);
         
         ViewGroup root = (ViewGroup) ((ViewGroup) this.findViewById(android.R.id.content)).getChildAt(0);
         root.setFocusable(true);
         root.requestFocus();
         
         scanRecipes();
-        setDialMode(DialMode.shutter);
+        setDialMode(mDialMode);
     }
 
     private void startAutoProcessPolling() {
@@ -94,7 +100,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 while (isPolling) {
                     try {
                         Thread.sleep(1000); 
-                        // ONLY TRIGGER IF ENGINE IS FULLY LOADED
                         if (!isProcessing && isReady && recipeIndex > 0) {
                             File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
                             File sonyDir = new File(dcim, "100MSDCF");
@@ -140,7 +145,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
         @Override protected void onPreExecute() {
             isReady = false;
-            // HARDWARE LOCK: Prevent taking a photo while parsing!
             if (mCameraEx != null) {
                 mCameraEx.stopDirectShutter(new CameraEx.DirectShutterStoppedCallback() {
                     @Override public void onShutterStopped(CameraEx cameraEx) {}
@@ -167,7 +171,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(Boolean success) {
             if (isCancelled()) return; 
             
-            // UNLOCK HARDWARE SHUTTER
             if (mCameraEx != null) mCameraEx.startDirectShutter();
 
             if (success) {
@@ -207,8 +210,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 if (original == null || !original.exists()) return "ERR: NO JPG FOUND";
 
-                // CHUNKING ENGINE: Prevents OOM by decoding in strips!
-                int sample = (qualityIndex == 1) ? 2 : 4; // 2 = 6MP, 4 = 1.5MP
+                int sample = (qualityIndex == 1) ? 2 : 4; 
                 
                 BitmapFactory.Options boundsOpt = new BitmapFactory.Options();
                 boundsOpt.inJustDecodeBounds = true;
@@ -219,7 +221,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 int targetW = rawWidth / sample;
                 int targetH = rawHeight / sample;
 
-                // Create the blank master canvas (12MB max)
                 Bitmap finalBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.RGB_565);
                 Canvas canvas = new Canvas(finalBmp);
 
@@ -228,7 +229,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 stripOpt.inSampleSize = sample;
                 stripOpt.inPreferredConfig = Bitmap.Config.RGB_565;
 
-                // Process in chunks to save memory
                 int stripHeight = (rawHeight / 10 / sample) * sample; 
                 int destY = 0;
 
@@ -236,15 +236,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     int h = Math.min(stripHeight, rawHeight - y);
                     Rect rect = new Rect(0, y, rawWidth, y + h);
                     
-                    // Pull a small slice
                     Bitmap strip = decoder.decodeRegion(rect, stripOpt);
                     Bitmap mutableStrip = strip.copy(Bitmap.Config.RGB_565, true);
                     strip.recycle();
 
-                    // Cook just that slice
                     mEngine.applyLutToBitmap(mutableStrip, null);
                     
-                    // Glue it to the master canvas
                     canvas.drawBitmap(mutableStrip, 0, destY, null);
                     destY += mutableStrip.getHeight();
                     mutableStrip.recycle();
@@ -253,9 +250,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 decoder.recycle();
 
+                // EXACT SAME LOGIC AS THE OLD 'COOKED' FOLDER
                 File rootDir = Environment.getExternalStorageDirectory();
                 File processedDir = new File(rootDir, "PROCESSED");
-                if (!processedDir.exists()) processedDir.mkdirs();
+                if (!processedDir.exists()) {
+                    processedDir.mkdirs();
+                }
                 
                 String newName = original.getName();
                 File outFile = new File(processedDir, newName);
@@ -358,6 +358,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvAperture.setTextColor(m == DialMode.aperture ? Color.GREEN : Color.WHITE);
         tvISO.setTextColor(m == DialMode.iso ? Color.GREEN : Color.WHITE);
         tvExposure.setTextColor(m == DialMode.exposure ? Color.GREEN : Color.WHITE);
+        tvRecipe.setTextColor(m == DialMode.recipe ? Color.GREEN : Color.WHITE);
         tvQuality.setTextColor(m == DialMode.quality ? Color.GREEN : Color.LTGRAY);
         updateRecipeDisplay(); 
     }
@@ -381,7 +382,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void updateRecipeDisplay() { 
         String name = recipeList.get(recipeIndex).split("\\.")[0].toUpperCase();
         tvRecipe.setText("< " + name + " >");
-        tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE);
     }
     
     @Override public void surfaceCreated(SurfaceHolder h) { 
