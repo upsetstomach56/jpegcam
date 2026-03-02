@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.hardware.Camera;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -12,7 +13,9 @@ import android.view.SurfaceView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback {
@@ -23,6 +26,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private List<Integer> supportedIsos;
     private int curIso;
     
+    private ArrayList<String> recipeList = new ArrayList<String>();
+    private int recipeIndex = 0;
+    
     enum DialMode { shutter, aperture, iso, recipe }
     private DialMode mDialMode = DialMode.shutter;
 
@@ -31,9 +37,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
-        surfaceView.getHolder().addCallback(this);
-        surfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        mSurfaceHolder = ((SurfaceView) findViewById(R.id.surfaceView)).getHolder();
+        mSurfaceHolder.addCallback(this);
+        mSurfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
         tvShutter = (TextView) findViewById(R.id.tvShutter);
         tvAperture = (TextView) findViewById(R.id.tvAperture);
@@ -41,7 +47,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         tvRecipe = (TextView) findViewById(R.id.tvRecipe);
         
+        scanRecipes();
         setDialMode(DialMode.shutter);
+    }
+
+    private void scanRecipes() {
+        recipeList.clear();
+        recipeList.add("NONE (DEFAULT)");
+        
+        // Scan /sdcard/LUTs for .cube or .png files
+        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTs");
+        if (!lutDir.exists()) lutDir.mkdirs(); // Create it if missing
+        
+        File[] files = lutDir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.getName().toLowerCase().endsWith(".cube") || f.getName().toLowerCase().endsWith(".png")) {
+                    recipeList.add(f.getName());
+                }
+            }
+        }
+        updateRecipeDisplay();
+    }
+
+    private void updateRecipeDisplay() {
+        String name = recipeList.get(recipeIndex);
+        // Added the arrows you requested to the UI text
+        tvRecipe.setText("<  " + name.toUpperCase() + "  >");
     }
 
     @Override
@@ -52,7 +84,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
             
-            // Initialize ISO list for the wheel
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCamera.getParameters());
             supportedIsos = (List<Integer>) pm.getSupportedISOSensitivities();
             curIso = pm.getISOSensitivity();
@@ -68,18 +99,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             
-            // Format Shutter (Issue 1 Fix)
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
             if (speed.first >= speed.second) tvShutter.setText((speed.first / speed.second) + "\"");
             else tvShutter.setText(speed.first + "/" + speed.second);
             
-            // Format Aperture (Issue 2 Fix)
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
-            
-            // Format ISO (Issue 3 Fix)
             tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
-            
-            // Format Exposure (Issue 4 Fix)
             tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         } catch (Exception e) {}
     }
@@ -87,26 +112,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
-
         if (scanCode == ScalarInput.ISV_KEY_DELETE) {
             notifySonyStatus(false);
             finish();
             return true;
         }
-
-        // Cycle through bottom/top labels using the DOWN button
         if (scanCode == ScalarInput.ISV_KEY_DOWN) {
-            if (mDialMode == DialMode.shutter) setDialMode(DialMode.aperture);
-            else if (mDialMode == DialMode.aperture) setDialMode(DialMode.iso);
-            else if (mDialMode == DialMode.iso) setDialMode(DialMode.recipe);
-            else setDialMode(DialMode.shutter);
+            cycleMode();
             return true;
         }
-
-        // Adjust selected value using the wheel
         if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
         if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
-
         return super.onKeyDown(keyCode, event);
     }
 
@@ -124,9 +140,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 Camera.Parameters p = mCamera.getParameters();
                 mCameraEx.createParametersModifier(p).setISOSensitivity(curIso);
                 mCamera.setParameters(p);
+            } else if (mDialMode == DialMode.recipe) {
+                // Cycle through SD Card recipes
+                recipeIndex = (recipeIndex + delta + recipeList.size()) % recipeList.size();
+                updateRecipeDisplay();
             }
             syncUI();
         } catch (Exception e) {}
+    }
+
+    private void cycleMode() {
+        if (mDialMode == DialMode.shutter) setDialMode(DialMode.aperture);
+        else if (mDialMode == DialMode.aperture) setDialMode(DialMode.iso);
+        else if (mDialMode == DialMode.iso) setDialMode(DialMode.recipe);
+        else setDialMode(DialMode.shutter);
     }
 
     private void setDialMode(DialMode mode) {
@@ -148,7 +175,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     public void surfaceCreated(SurfaceHolder h) {
         try { if (mCamera != null) { mCamera.setPreviewDisplay(h); mCamera.startPreview(); } } catch (Exception e) {}
     }
-
+    private SurfaceHolder mSurfaceHolder;
     @Override protected void onPause() { super.onPause(); if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; } }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
