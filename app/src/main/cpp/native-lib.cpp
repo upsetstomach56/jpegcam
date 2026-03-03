@@ -88,17 +88,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         return JNI_FALSE;
     }
 
-    // Zero-out the memory so libjpeg doesn't crash on random garbage
     memset(cinfo_d, 0, sizeof(struct jpeg_decompress_struct));
     memset(cinfo_c, 0, sizeof(struct jpeg_compress_struct));
 
     LOGE("C++: Setting up Decompressor Error Handler");
-    cinfo_d->err = cook_jpeg_std_error(&jerr_d->pub);
+    cinfo_d->err = jpeg_std_error(&jerr_d->pub);
     jerr_d->pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
         LOGE("C++: FATAL JUMP - Decompressor crashed!");
-        cook_jpeg_destroy_decompress(cinfo_d);
+        jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
         fclose(infile); fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
@@ -106,23 +105,23 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         return JNI_FALSE;
     }
     
-    LOGE("C++: Calling cook_jpeg_create_decompress...");
-    cook_jpeg_create_decompress(cinfo_d);
+    LOGE("C++: Calling jpeg_create_decompress...");
+    jpeg_create_decompress(cinfo_d);
     LOGE("C++: Decompressor created successfully! Internal Collision Dodged!");
     
-    cook_jpeg_stdio_src(cinfo_d, infile);
-    cook_jpeg_read_header(cinfo_d, TRUE);
+    jpeg_stdio_src(cinfo_d, infile);
+    jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->out_color_space = JCS_RGB; 
-    cook_jpeg_start_decompress(cinfo_d);
+    jpeg_start_decompress(cinfo_d);
 
     LOGE("C++: Setup Compressor Error Handler");
-    cinfo_c->err = cook_jpeg_std_error(&jerr_c->pub);
+    cinfo_c->err = jpeg_std_error(&jerr_c->pub);
     jerr_c->pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         LOGE("C++: FATAL JUMP - Compressor crashed!");
-        cook_jpeg_destroy_compress(cinfo_c);
-        cook_jpeg_destroy_decompress(cinfo_d);
+        jpeg_destroy_compress(cinfo_c);
+        jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
         fclose(infile); fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
@@ -130,19 +129,19 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         return JNI_FALSE;
     }
     
-    LOGE("C++: Calling cook_jpeg_create_compress...");
-    cook_jpeg_create_compress(cinfo_c);
+    LOGE("C++: Calling jpeg_create_compress...");
+    jpeg_create_compress(cinfo_c);
     LOGE("C++: Compressor created successfully!");
 
-    cook_jpeg_stdio_dest(cinfo_c, outfile);
+    jpeg_stdio_dest(cinfo_c, outfile);
     
     cinfo_c->image_width = cinfo_d->output_width;
     cinfo_c->image_height = cinfo_d->output_height;
     cinfo_c->input_components = 3;
     cinfo_c->in_color_space = JCS_RGB;
-    cook_jpeg_set_defaults(cinfo_c);
-    cook_jpeg_set_quality(cinfo_c, 95, TRUE);
-    cook_jpeg_start_compress(cinfo_c, TRUE);
+    jpeg_set_defaults(cinfo_c);
+    jpeg_set_quality(cinfo_c, 95, TRUE);
+    jpeg_start_compress(cinfo_c, TRUE);
 
     int lutMax = nativeLutSize - 1;
     for (int i = 0; i < 256; i++) {
@@ -157,7 +156,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     LOGE("C++: Entering 24MP Scanline Loop...");
     int rows_processed = 0;
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
-        cook_jpeg_read_scanlines(cinfo_d, buffer, 1);
+        jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
 
         for (int x = 0; x < row_stride; x += 3) {
@@ -195,17 +194,17 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             row[x+2] = outB > 255 ? 255 : (outB < 0 ? 0 : outB);
         }
         
-        cook_jpeg_write_scanlines(cinfo_c, buffer, 1);
+        jpeg_write_scanlines(cinfo_c, buffer, 1);
         rows_processed++;
         if (rows_processed == 1000) LOGE("C++: 1000 rows processed...");
         if (rows_processed == 3000) LOGE("C++: 3000 rows processed...");
     }
 
     LOGE("C++: Scanline Loop Finished. Cleaning up Heap Memory.");
-    cook_jpeg_finish_compress(cinfo_c);
-    cook_jpeg_destroy_compress(cinfo_c);
-    cook_jpeg_finish_decompress(cinfo_d);
-    cook_jpeg_destroy_decompress(cinfo_d);
+    jpeg_finish_compress(cinfo_c);
+    jpeg_destroy_compress(cinfo_c);
+    jpeg_finish_decompress(cinfo_d);
+    jpeg_destroy_decompress(cinfo_d);
     
     free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
 

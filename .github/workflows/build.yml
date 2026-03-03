@@ -15,16 +15,14 @@ jobs:
 
     - name: The Cloaking Script (Total DNA Mutation)
       run: |
-        cd app/src/main/cpp/libjpeg-turbo
-        # 1. Mutate Public API
-        FUNCS="jpeg_std_error jpeg_CreateDecompress jpeg_create_decompress jpeg_destroy_decompress jpeg_stdio_src jpeg_read_header jpeg_start_decompress jpeg_read_scanlines jpeg_finish_decompress jpeg_CreateCompress jpeg_create_compress jpeg_destroy_compress jpeg_stdio_dest jpeg_set_defaults jpeg_set_quality jpeg_start_compress jpeg_write_scanlines jpeg_finish_compress"
-        for FUNC in $FUNCS; do
-          find . -type f \( -name "*.[ch]" \) -exec sed -i "s/\b$FUNC\b/cook_$FUNC/g" {} +
-        done
-        
-        # 2. Mutate Internal Back Doors (The Silent Assassins)
-        find . -type f \( -name "*.[ch]" \) -exec sed -i "s/\bjinit_/cook_jinit_/g" {} +
-        find . -type f \( -name "*.[ch]" \) -exec sed -i "s/\bjsimd_/cook_jsimd_/g" {} +
+        echo "Mutating library DNA to prevent Sony OS collision..."
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjpeg_/cook_jpeg_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjinit_/cook_jinit_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjsimd_/cook_jsimd_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjcopy_/cook_jcopy_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjzero_/cook_jzero_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjdiv_/cook_jdiv_/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjround_/cook_jround_/g' {} +
 
     - name: Create Clean Room SDK & NDK
       run: |
