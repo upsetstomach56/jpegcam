@@ -72,7 +72,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         contentRoot.addView(tvStatus, statusParams);
 
         tvQuality = new TextView(this);
-        tvQuality.setText("ENGINE: NATIVE C++ (ABSOLUTE ZERO)");
+        tvQuality.setText("ENGINE: TURBO SCANLINE (24MP)");
         tvQuality.setTextColor(Color.LTGRAY);
         tvQuality.setTextSize(18); 
         FrameLayout.LayoutParams qualityParams = new FrameLayout.LayoutParams(
@@ -215,15 +215,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR: FILE MISSING";
 
-                // THE FILE LOCK FIX: Wait until the camera actually finishes writing the file!
+                // SAFETY RAIL: 10-Second Spin-Lock Timeout
+                // Checks every 500ms. If it reaches 20 checks, it aborts safely.
                 long lastSize = -1;
-                while (true) {
+                int timeout = 0;
+                while (timeout < 20) {
                     long currentSize = original.length();
                     if (currentSize > 0 && currentSize == lastSize) {
-                        break; // File size stopped growing, it is fully written
+                        break; 
                     }
                     lastSize = currentSize;
-                    Thread.sleep(500); // Check every half second
+                    Thread.sleep(500);
+                    timeout++;
+                }
+                
+                if (timeout >= 20) {
+                    return "ERR: CAMERA WRITE TIMEOUT";
                 }
 
                 File rootDir = Environment.getExternalStorageDirectory();
@@ -231,11 +238,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 if (!outDir.exists()) outDir.mkdirs();
                 File outFile = new File(outDir, original.getName());
 
-                // Pass ONLY the paths. Java memory stays completely empty.
+                // Pass the strings to C++ Turbo Engine
                 boolean success = mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 if (!success) {
-                    return "CRASH: STB NATIVE DECODE FAILURE";
+                    return "CRASH: TURBO NATIVE DECODE FAILURE";
                 }
 
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());

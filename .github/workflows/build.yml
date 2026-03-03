@@ -6,11 +6,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Download STB Image Headers
+    - name: Download libjpeg-turbo Source
       run: |
-        mkdir -p app/src/main/cpp
-        wget -q https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -O app/src/main/cpp/stb_image.h
-        wget -q https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h -O app/src/main/cpp/stb_image_write.h
+        cd app/src/main/cpp
+        wget -q https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/2.1.5.1.tar.gz
+        tar -xzf 2.1.5.1.tar.gz
+        mv libjpeg-turbo-2.1.5.1 libjpeg-turbo
 
     - name: Create Clean Room SDK & NDK
       run: |
