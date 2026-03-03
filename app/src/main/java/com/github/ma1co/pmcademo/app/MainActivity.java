@@ -49,6 +49,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // ==========================================
+        // THE BLACK BOX FLIGHT RECORDER
+        // ==========================================
+        try {
+            File logFile = new File(Environment.getExternalStorageDirectory(), "JPG_Cookbook_CrashLog.txt");
+            Runtime.getRuntime().exec("logcat -c"); // Clear old history
+            Runtime.getRuntime().exec("logcat -f " + logFile.getAbsolutePath()); // Stream live OS logs to SD Card
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        // ==========================================
         
         mSurfaceView = (SurfaceView) findViewById(R.id.surfaceView);
         mSurfaceView.getHolder().addCallback(this);
