@@ -70,7 +70,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     struct my_error_mgr* jerr_d = (struct my_error_mgr*) malloc(sizeof(struct my_error_mgr));
     struct jpeg_compress_struct* cinfo_c = (struct jpeg_compress_struct*) malloc(sizeof(struct jpeg_compress_struct));
     struct my_error_mgr* jerr_c = (struct my_error_mgr*) malloc(sizeof(struct my_error_mgr));
-    
+    int* map = (int*) malloc(256 * sizeof(int)); // MOVED BACK UP
+
     memset(cinfo_d, 0, sizeof(struct jpeg_decompress_struct));
     memset(cinfo_c, 0, sizeof(struct jpeg_compress_struct));
 
@@ -79,15 +80,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
-        jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c);
+        jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
         fclose(infile); fclose(outfile); return JNI_FALSE;
     }
     
     jpeg_create_decompress(cinfo_d);
-
-    // --- OPTIMIZATION: SAVE EXIF MARKERS ---
     jpeg_save_markers(cinfo_d, JPEG_APP0 + 1, 0xFFFF); 
-
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->scale_num = 1;
@@ -101,7 +99,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
-        free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c);
+        free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
         fclose(infile); fclose(outfile); return JNI_FALSE;
     }
     
@@ -114,7 +112,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_set_defaults(cinfo_c);
     jpeg_set_quality(cinfo_c, 95, TRUE);
 
-    // --- OPTIMIZATION: WRITE EXIF MARKERS BEFORE COMPRESSING PIXELS ---
     jpeg_saved_marker_ptr marker = cinfo_d->marker_list;
     while (marker != NULL) {
         jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
@@ -129,22 +126,19 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     JSAMPARRAY buffer = (*cinfo_d->mem->alloc_sarray)((j_common_ptr) cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
     const int* pR = &nativeLutR[0]; const int* pG = &nativeLutG[0]; const int* pB = &nativeLutB[0];
+    for (int i = 0; i < 256; i++) { map[i] = (i * lutMax * 128) / 255; }
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
-
         for (int x = 0; x < row_stride; x += 3) {
             float r_f = (row[x] / 255.0f) * lutMax;
             float g_f = (row[x+1] / 255.0f) * lutMax;
             float b_f = (row[x+2] / 255.0f) * lutMax;
-
             int r0 = (int)r_f; int g0 = (int)g_f; int b0 = (int)b_f;
             float dr = r_f - r0; float dg = g_f - g0; float db = b_f - b0;
-
             int i000 = r0 + g0 * nativeLutSize + b0 * lutSize2;
             int oR, oG, oB;
-
             if (dr > dg) {
                 if (dg > db) { 
                     int i100 = (r0+1) + g0 * nativeLutSize + b0 * lutSize2;
@@ -192,17 +186,15 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                     oB = pB[i000] + dg*(pB[i010]-pB[i000]) + dr*(pB[i110]-pB[i010]) + db*(pB[i111]-pB[i110]);
                 }
             }
-
             row[x] = (unsigned char)(oR < 0 ? 0 : (oR > 255 ? 255 : oR));
             row[x+1] = (unsigned char)(oG < 0 ? 0 : (oG > 255 ? 255 : oG));
             row[x+2] = (unsigned char)(oB < 0 ? 0 : (oB > 255 ? 255 : oB));
         }
         jpeg_write_scanlines(cinfo_c, buffer, 1);
     }
-
     jpeg_finish_compress(cinfo_c); jpeg_destroy_compress(cinfo_c);
     jpeg_finish_decompress(cinfo_d); jpeg_destroy_decompress(cinfo_d);
-    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c);
+    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
     fclose(infile); fclose(outfile);
     env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
     return JNI_TRUE;

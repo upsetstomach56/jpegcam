@@ -39,6 +39,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
     private SonyFileObserver mFileObserver;
+    private String sonyDCIMPath = "";
 
     public enum DialMode { shutter, aperture, iso, exposure, recipe, quality }
     private DialMode mDialMode = DialMode.recipe;
@@ -51,8 +52,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public void onEvent(int event, final String path) {
             if (path == null || isProcessing || !isReady || recipeIndex == 0) return;
             if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
-                Log.e("COOKBOOK_LOG", "JAVA: File closed! Starting C++ instantly.");
-                final String fullPath = Environment.getExternalStorageDirectory() + "/DCIM/100MSDCF/" + path;
+                Log.e("COOKBOOK_LOG", "JAVA: CLOSE_WRITE detected via FileObserver!");
+                final String fullPath = sonyDCIMPath + "/" + path;
                 runOnUiThread(new Runnable() {
                     @Override public void run() { new ProcessTask().execute(fullPath); }
                 });
@@ -98,9 +99,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         scanRecipes();
         setDialMode(mDialMode);
 
-        File sonyDir = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
-        if (!sonyDir.exists()) sonyDir.mkdirs();
-        mFileObserver = new SonyFileObserver(sonyDir.getAbsolutePath());
+        // --- PATH SEARCHER: Ensure we find the real SD card folder ---
+        String[] possibleRoots = {
+            Environment.getExternalStorageDirectory().getAbsolutePath(),
+            "/mnt/sdcard",
+            "/storage/sdcard0",
+            "/sdcard"
+        };
+        for (String r : possibleRoots) {
+            File f = new File(r + "/DCIM/100MSDCF");
+            if (f.exists()) {
+                sonyDCIMPath = f.getAbsolutePath();
+                break;
+            }
+        }
+        if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
+        
+        Log.e("COOKBOOK_LOG", "JAVA: Observing path: " + sonyDCIMPath);
+        mFileObserver = new SonyFileObserver(sonyDCIMPath);
     }
 
     private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
@@ -134,11 +150,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             try {
                 File original = new File(params[0]);
                 int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);
-                File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                File rootDir = Environment.getExternalStorageDirectory();
+                File outDir = new File(rootDir, "GRADED");
                 if (!outDir.exists()) outDir.mkdirs();
                 File outFile = new File(outDir, original.getName());
 
-                // Perform the high-speed C++ tetrahedral math (EXIF is handled automatically in C++)
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale)) {
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SUCCESS: SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
@@ -233,8 +249,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             mCamera.setPreviewDisplay(h); mCamera.startPreview(); syncUI();
         } catch (Exception e) {} 
     }
-    @Override protected void onResume() { super.onResume(); if (mCamera != null) syncUI(); mFileObserver.startWatching(); }
-    @Override protected void onPause() { super.onPause(); if (mCameraEx != null) mCameraEx.release(); mFileObserver.stopWatching(); }
+    @Override protected void onResume() { super.onResume(); if (mCamera != null) syncUI(); if (mFileObserver != null) mFileObserver.startWatching(); }
+    @Override protected void onPause() { super.onPause(); if (mCameraEx != null) mCameraEx.release(); if (mFileObserver != null) mFileObserver.stopWatching(); }
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { syncUI(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
