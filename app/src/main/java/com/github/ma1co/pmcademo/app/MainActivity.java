@@ -11,6 +11,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.FileObserver;
+import android.text.Html;
 import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
@@ -21,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -35,6 +37,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     // UI Elements
     private FrameLayout mainUIContainer;
+    private ScrollView menuScrollView;
     private LinearLayout menuContainer;
     private TextView tvBottomBar, tvTopStatus; 
     private TextView[] menuItems = new TextView[7];
@@ -64,9 +67,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
     
     private RTLProfile[] profiles = new RTLProfile[10];
-    private int currentSlot = 0; // 0 to 9 (Represents Slot 1 to 10)
+    private int currentSlot = 0; // 0 to 9
     private int qualityIndex = 1; // 0=Proxy, 1=High, 2=Ultra
-    private int menuSelection = 0; // Highlights which menu item we are adjusting
+    private int menuSelection = 0; 
+
+    public enum DialMode { rtl, shutter, aperture, iso, exposure }
+    private DialMode mDialMode = DialMode.rtl;
 
     private class SonyFileObserver extends FileObserver {
         public SonyFileObserver(String path) { super(path, FileObserver.CLOSE_WRITE); }
@@ -82,19 +88,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
         
-        mSurfaceView = (SurfaceView) findViewById(R.id.surfaceView);
+        // BYPASS XML INFLATION: Builds clean layout to prevent ghost text
+        FrameLayout rootLayout = new FrameLayout(this);
+        mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
         mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
-        
-        // Scan SD card for LUTs first, so the preference loader can match filenames
+        rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(-1, -1));
+
+        setContentView(rootLayout);
+
         scanRecipes();
-        
         for(int i=0; i<10; i++) profiles[i] = new RTLProfile();
         loadPreferences();
 
-        buildUI();
+        buildUI(rootLayout);
 
         String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
         for (String r : possibleRoots) {
@@ -102,17 +110,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (f.exists()) { sonyDCIMPath = f.getAbsolutePath(); break; }
         }
         if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
-        mFileObserver = new SonyFileObserver(sonyDCIMPath);
-
+        
         triggerLutPreload();
     }
 
-    private void buildUI() {
-        ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
-        
+    private void buildUI(FrameLayout rootLayout) {
         // Main HUD
         mainUIContainer = new FrameLayout(this);
-        contentRoot.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
+        rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
 
         tvTopStatus = new TextView(this);
         tvTopStatus.setTextColor(Color.WHITE);
@@ -123,50 +128,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mainUIContainer.addView(tvTopStatus, topParams);
 
         tvBottomBar = new TextView(this);
-        tvBottomBar.setTextColor(Color.WHITE);
-        tvBottomBar.setTextSize(16);
+        tvBottomBar.setTextSize(18);
         tvBottomBar.setShadowLayer(3, 0, 0, Color.BLACK);
         FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // Menu Overlay
+        // Menu Overlay (With ScrollView to prevent cutoffs)
+        menuScrollView = new ScrollView(this);
+        menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
+        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(600, 350, Gravity.CENTER);
+        
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
-        menuContainer.setBackgroundColor(Color.argb(220, 20, 20, 20)); // Dark translucent bg
         menuContainer.setPadding(40, 40, 40, 40);
-        FrameLayout.LayoutParams menuParams = new FrameLayout.LayoutParams(600, -2, Gravity.CENTER);
-        contentRoot.addView(menuContainer, menuParams);
+        menuScrollView.addView(menuContainer);
 
         for (int i = 0; i < 7; i++) {
             menuItems[i] = new TextView(this);
-            menuItems[i].setTextSize(22);
-            menuItems[i].setPadding(0, 10, 0, 10);
+            menuItems[i].setTextSize(20);
+            menuItems[i].setPadding(0, 12, 0, 12);
             menuContainer.addView(menuItems[i]);
         }
-        menuContainer.setVisibility(View.GONE);
+        menuScrollView.setVisibility(View.GONE);
+        rootLayout.addView(menuScrollView, scrollParams);
         
-        ViewGroup root = (ViewGroup) contentRoot.getChildAt(0);
-        root.setFocusable(true); root.requestFocus();
-
         updateMainHUD();
         renderMenu();
     }
 
-    // --- PERMANENT MEMORY HANDLING ---
     private void savePreferences() {
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
         editor.putInt("qualityIndex", qualityIndex);
         editor.putInt("currentSlot", currentSlot);
         for(int i=0; i<10; i++) {
-            // Save the actual STRING NAME of the LUT, not the index number!
             editor.putString("slot_" + i + "_lutName", recipeList.get(profiles[i].lutIndex));
             editor.putInt("slot_" + i + "_opac", profiles[i].opacity);
             editor.putInt("slot_" + i + "_grain", profiles[i].grain);
             editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
         }
-        editor.commit(); // Writes to non-volatile flash memory
+        editor.commit();
     }
 
     private void loadPreferences() {
@@ -174,11 +176,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         qualityIndex = prefs.getInt("qualityIndex", 1);
         currentSlot = prefs.getInt("currentSlot", 0);
         for(int i=0; i<10; i++) {
-            // Retrieve by Name, ensuring deleted files don't cause index shifting or crashes
             String savedLutName = prefs.getString("slot_" + i + "_lutName", "NONE");
             int foundIndex = recipeList.indexOf(savedLutName);
             profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
-            
             profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100);
             profiles[i].grain = prefs.getInt("slot_" + i + "_grain", 0);
             profiles[i].rollOff = prefs.getInt("slot_" + i + "_roll", 0);
@@ -186,7 +186,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- HARDWARE BUTTON INPUTS ---
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
@@ -195,11 +194,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                menuContainer.setVisibility(View.VISIBLE);
+                menuScrollView.setVisibility(View.VISIBLE);
                 mainUIContainer.setVisibility(View.GONE);
                 renderMenu();
             } else {
-                menuContainer.setVisibility(View.GONE);
+                menuScrollView.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 savePreferences();
                 triggerLutPreload();
@@ -208,7 +207,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
-        // TOGGLE HUD DISPLAY (Mapped to the Center "ENTER" button instead of DISP)
+        // TOGGLE CLEAN SCREEN (Mapped to Center 'ENTER' button)
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 displayState = (displayState == 0) ? 1 : 0;
@@ -219,21 +218,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (!isProcessing) {
             if (isMenuOpen) {
-                // NAVIGATE MENU
                 if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 7) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleMenuChange(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleMenuChange(1); return true; }
             } else {
-                // QUICK SWAP RTL SLOTS (Main Screen)
-                if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { 
-                    currentSlot = (currentSlot - 1 + 10) % 10; 
-                    triggerLutPreload(); updateMainHUD(); return true; 
-                }
-                if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { 
-                    currentSlot = (currentSlot + 1) % 10; 
-                    triggerLutPreload(); updateMainHUD(); return true; 
-                }
+                // Main Screen Navigation
+                if (sc == ScalarInput.ISV_KEY_UP) { cycleMode(-1); return true; }
+                if (sc == ScalarInput.ISV_KEY_DOWN) { cycleMode(1); return true; }
+                if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
+                if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
             }
         }
         return super.onKeyDown(keyCode, event);
@@ -241,17 +235,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void handleMenuChange(int dir) {
         RTLProfile p = profiles[currentSlot];
-        int d10 = dir * 10; // For faster scrubbing on 0-100 values
-        
-        switch(menuSelection) {
-            case 0: qualityIndex = (qualityIndex + dir + 3) % 3; break;
-            case 1: currentSlot = (currentSlot + dir + 10) % 10; break; 
-            case 2: p.lutIndex = (p.lutIndex + dir + recipeList.size()) % recipeList.size(); break;
-            case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + d10)); break;
-            case 4: p.grain = Math.max(0, Math.min(100, p.grain + d10)); break;
-            case 5: p.rollOff = Math.max(0, Math.min(100, p.rollOff + d10)); break;
-            case 6: p.vignette = Math.max(0, Math.min(100, p.vignette + d10)); break;
-        }
+        int d10 = dir * 10; 
+        try {
+            switch(menuSelection) {
+                case 0: qualityIndex = (qualityIndex + dir + 3) % 3; break;
+                case 1: currentSlot = (currentSlot + dir + 10) % 10; break; 
+                case 2: p.lutIndex = (p.lutIndex + dir + recipeList.size()) % recipeList.size(); break;
+                case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + d10)); break;
+                case 4: p.grain = Math.max(0, Math.min(100, p.grain + d10)); break;
+                case 5: p.rollOff = Math.max(0, Math.min(100, p.rollOff + d10)); break;
+                case 6: p.vignette = Math.max(0, Math.min(100, p.vignette + d10)); break;
+            }
+        } catch (Exception e) {}
         renderMenu();
     }
 
@@ -273,6 +268,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    private void cycleMode(int dir) {
+        DialMode[] modes = DialMode.values();
+        int ord = (mDialMode.ordinal() + dir + modes.length) % modes.length;
+        mDialMode = modes[ord];
+        updateMainHUD();
+    }
+
+    private void handleInput(int d) {
+        if (mCameraEx == null) return;
+        try {
+            Camera.Parameters p = mCamera.getParameters();
+            CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
+            
+            if (mDialMode == DialMode.rtl) { 
+                currentSlot = (currentSlot + d + 10) % 10; 
+                triggerLutPreload(); 
+            }
+            else if (mDialMode == DialMode.shutter) { 
+                if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); 
+            }
+            else if (mDialMode == DialMode.aperture) { 
+                if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); 
+            }
+            else if (mDialMode == DialMode.iso) {
+                List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
+                int idx = isos.indexOf(pm.getISOSensitivity());
+                if (idx != -1) { pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); mCamera.setParameters(p); }
+            }
+            else if (mDialMode == DialMode.exposure) { 
+                p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), p.getExposureCompensation() + d))); 
+                mCamera.setParameters(p); 
+            }
+            updateMainHUD();
+        } catch (Exception e) {}
+    }
+
     private void updateMainHUD() {
         if(mCamera == null) return;
         RTLProfile p = profiles[currentSlot];
@@ -287,7 +318,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String ap = "f/" + (pm.getAperture() / 100.0f);
             String iso = pm.getISOSensitivity() == 0 ? "AUTO" : String.valueOf(pm.getISOSensitivity());
             String exp = String.format("%.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
-            tvBottomBar.setText("S: " + ss + "  A: " + ap + "  ISO: " + iso + "  EV: " + exp);
+
+            String g = "<font color='#00FF00'>";
+            String w = "<font color='#FFFFFF'>";
+            
+            String html = (mDialMode == DialMode.rtl ? g : w) + "[RTL " + (currentSlot+1) + "]</font>   " +
+                          (mDialMode == DialMode.shutter ? g : w) + "S: " + ss + "</font>   " + 
+                          (mDialMode == DialMode.aperture ? g : w) + "A: " + ap + "</font>   " + 
+                          (mDialMode == DialMode.iso ? g : w) + "ISO: " + iso + "</font>   " + 
+                          (mDialMode == DialMode.exposure ? g : w) + "EV: " + exp + "</font>";
+                          
+            tvBottomBar.setText(Html.fromHtml(html));
         } catch (Exception e) {}
     }
 
@@ -318,7 +359,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 while (isPolling) {
                     try {
                         Thread.sleep(300); 
-                        // ALWAYS search for new files, regardless of LUT
                         File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
                         File sonyDir = new File(dcim, "100MSDCF");
                         if (sonyDir.exists()) {
@@ -332,15 +372,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                 }
                                 if (newest != null) {
                                     if (lastNewestFileTime == 0) {
-                                        lastNewestFileTime = maxModified; // Startup state
+                                        lastNewestFileTime = maxModified;
                                     } else if (maxModified > lastNewestFileTime) {
                                         lastNewestFileTime = maxModified;
-                                        // TRIGGER PROCESS IF READY OR IF "NONE" IS SELECTED
                                         if (!isProcessing && (isReady || profiles[currentSlot].lutIndex == 0)) {
                                             final String path = newest.getAbsolutePath();
-                                            runOnUiThread(new Runnable() {
-                                                @Override public void run() { if (!isProcessing) new ProcessTask().execute(path); }
-                                            });
+                                            runOnUiThread(new Runnable() { @Override public void run() { if (!isProcessing) new ProcessTask().execute(path); } });
                                         }
                                     }
                                 }
@@ -401,7 +438,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(String result) {
             isProcessing = false;
             tvTopStatus.setTextColor(Color.WHITE);
-            updateMainHUD(); // Resets back to standard view
+            updateMainHUD(); 
         }
     }
 
