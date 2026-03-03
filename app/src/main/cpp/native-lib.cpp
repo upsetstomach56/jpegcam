@@ -29,10 +29,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
     const char *file_path = env->GetStringUTFChars(path, NULL);
     FILE *file = fopen(file_path, "r");
     env->ReleaseStringUTFChars(path, file_path);
-    if (!file) {
-        LOGE("C++: Failed to open LUT file");
-        return JNI_FALSE;
-    }
+    if (!file) return JNI_FALSE;
 
     nativeLutR.clear(); nativeLutG.clear(); nativeLutB.clear();
     nativeLutSize = 0;
@@ -54,101 +51,76 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
         }
     }
     fclose(file);
-    LOGE("C++: LUT loaded successfully. Size: %d", nativeLutSize);
     return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath) {
     LOGE("C++: --- SCANLINE ENGINE INITIATED ---");
-    
-    if (nativeLutSize == 0) {
-        LOGE("C++: Engine failed - No LUT loaded in memory.");
-        return JNI_FALSE;
-    }
+    if (nativeLutSize == 0) return JNI_FALSE;
 
     const char *in_file = env->GetStringUTFChars(inPath, NULL);
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
     
-    LOGE("C++: Opening input file: %s", in_file);
     FILE *infile = fopen(in_file, "rb");
-    if (!infile) {
-        LOGE("C++: Failed to read input file.");
-        env->ReleaseStringUTFChars(inPath, in_file);
-        env->ReleaseStringUTFChars(outPath, out_file);
-        return JNI_FALSE;
-    }
-
-    LOGE("C++: Opening output file: %s", out_file);
     FILE *outfile = fopen(out_file, "wb");
-    if (!outfile) {
-        LOGE("C++: Failed to create output file.");
-        fclose(infile);
+    if (!infile || !outfile) {
+        if (infile) fclose(infile);
+        if (outfile) fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
         env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
 
-    LOGE("C++: Step 1 - Setting up LibJpeg Decompressor");
+    LOGE("C++: Step 1 - Setting up LibJpeg Decompressor (Cloaked)");
     struct jpeg_decompress_struct cinfo_d;
     struct my_error_mgr jerr_d;
-    cinfo_d.err = jpeg_std_error(&jerr_d.pub);
+    cinfo_d.err = cook_jpeg_std_error(&jerr_d.pub);
     jerr_d.pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_d.setjmp_buffer)) {
         LOGE("C++: FATAL JUMP - Decompressor crashed!");
-        jpeg_destroy_decompress(&cinfo_d);
+        cook_jpeg_destroy_decompress(&cinfo_d);
         fclose(infile); fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
         env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
     
-    LOGE("C++: Calling jpeg_create_decompress. If it dies after this, it's a Symbol Collision!");
-    jpeg_create_decompress(&cinfo_d);
-    LOGE("C++: Decompressor created successfully. Reading header.");
+    LOGE("C++: Calling cook_jpeg_create_decompress...");
+    cook_jpeg_create_decompress(&cinfo_d);
+    LOGE("C++: Decompressor created successfully! Collision Dodged!");
     
-    jpeg_stdio_src(&cinfo_d, infile);
-    jpeg_read_header(&cinfo_d, TRUE);
+    cook_jpeg_stdio_src(&cinfo_d, infile);
+    cook_jpeg_read_header(&cinfo_d, TRUE);
     cinfo_d.out_color_space = JCS_RGB; 
-    jpeg_start_decompress(&cinfo_d);
-    
-    LOGE("C++: Header read. Image Size: %dx%d", cinfo_d.output_width, cinfo_d.output_height);
+    cook_jpeg_start_decompress(&cinfo_d);
 
     LOGE("C++: Step 2 - Setting up LibJpeg Compressor");
     struct jpeg_compress_struct cinfo_c;
     struct my_error_mgr jerr_c;
-    cinfo_c.err = jpeg_std_error(&jerr_c.pub);
+    cinfo_c.err = cook_jpeg_std_error(&jerr_c.pub);
     jerr_c.pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_c.setjmp_buffer)) {
-        LOGE("C++: FATAL JUMP - Compressor crashed!");
-        jpeg_destroy_compress(&cinfo_c);
-        jpeg_destroy_decompress(&cinfo_d);
+        cook_jpeg_destroy_compress(&cinfo_c);
+        cook_jpeg_destroy_decompress(&cinfo_d);
         fclose(infile); fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
         env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
     
-    jpeg_create_compress(&cinfo_c);
-    jpeg_stdio_dest(&cinfo_c, outfile);
+    cook_jpeg_create_compress(&cinfo_c);
+    cook_jpeg_stdio_dest(&cinfo_c, outfile);
     
     cinfo_c.image_width = cinfo_d.output_width;
     cinfo_c.image_height = cinfo_d.output_height;
     cinfo_c.input_components = 3;
     cinfo_c.in_color_space = JCS_RGB;
-    jpeg_set_defaults(&cinfo_c);
-    jpeg_set_quality(&cinfo_c, 95, TRUE);
-    jpeg_start_compress(&cinfo_c, TRUE);
-
-    LOGE("C++: Step 3 - Allocating 1 Row of RAM (18KB)");
-    int expectedSize = nativeLutSize * nativeLutSize * nativeLutSize;
-    if (nativeLutR.size() < expectedSize) {
-        nativeLutR.resize(expectedSize, 0);
-        nativeLutG.resize(expectedSize, 0);
-        nativeLutB.resize(expectedSize, 0);
-    }
+    cook_jpeg_set_defaults(&cinfo_c);
+    cook_jpeg_set_quality(&cinfo_c, 95, TRUE);
+    cook_jpeg_start_compress(&cinfo_c, TRUE);
 
     int map[256];
     int lutMax = nativeLutSize - 1;
@@ -160,10 +132,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     JSAMPARRAY buffer = (*cinfo_d.mem->alloc_sarray)((j_common_ptr) &cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
-    LOGE("C++: Step 4 - Entering Scanline Loop");
+    LOGE("C++: Step 3 - Entering Scanline Loop");
     int rows_processed = 0;
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
-        jpeg_read_scanlines(&cinfo_d, buffer, 1);
+        cook_jpeg_read_scanlines(&cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
 
         for (int x = 0; x < row_stride; x += 3) {
@@ -201,19 +173,17 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             row[x+2] = outB > 255 ? 255 : (outB < 0 ? 0 : outB);
         }
         
-        jpeg_write_scanlines(&cinfo_c, buffer, 1);
+        cook_jpeg_write_scanlines(&cinfo_c, buffer, 1);
         rows_processed++;
-        
         if (rows_processed == 1000) LOGE("C++: 1000 rows processed...");
-        if (rows_processed == 2000) LOGE("C++: 2000 rows processed...");
         if (rows_processed == 3000) LOGE("C++: 3000 rows processed...");
     }
 
-    LOGE("C++: Step 5 - Image Processed Successfully. Cleaning up RAM.");
-    jpeg_finish_compress(&cinfo_c);
-    jpeg_destroy_compress(&cinfo_c);
-    jpeg_finish_decompress(&cinfo_d);
-    jpeg_destroy_decompress(&cinfo_d);
+    LOGE("C++: Step 4 - Image Processed. Cleaning up RAM.");
+    cook_jpeg_finish_compress(&cinfo_c);
+    cook_jpeg_destroy_compress(&cinfo_c);
+    cook_jpeg_finish_decompress(&cinfo_d);
+    cook_jpeg_destroy_decompress(&cinfo_d);
     
     fclose(infile);
     fclose(outfile);
