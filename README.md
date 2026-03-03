@@ -12,6 +12,9 @@ Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulati
 * **Dual Quality Modes:** Toggle between `PROXY (1.5MP)` for speed and `HIGH (6.0MP)` for quality.
 * **Non-Destructive:** Original files are untouched. Graded copies are saved to a `/GRADED/` folder.
 
+## ❗️ Important Notice Regarding LUT Names
+* Keep your LUT filenames short! Use 8 characters or less (e.g., Kodak400.cube). Long filenames may be invisible to the camera's file system.
+
 ## 🚧 Known Limitations (The "Beta" Reality)
 * **Processing Speed:** Because the camera uses a legacy processor, the "High" quality mode can take 15–20 seconds to process a single image. The app uses a "chunking" method to prevent the camera from crashing due to low memory.
 * **JPEG Only:** This version is optimized for JPEGs. RAW files are ignored by the processor.
