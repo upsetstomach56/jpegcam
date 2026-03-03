@@ -80,7 +80,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     struct my_error_mgr* jerr_c = (struct my_error_mgr*) malloc(sizeof(struct my_error_mgr));
     int* map = (int*) malloc(256 * sizeof(int));
 
-    if (!cinfo_d || !jerr_d || !cinfo_c || !jerr_c || !map) return JNI_FALSE;
+    if (!cinfo_d || !jerr_d || !cinfo_c || !jerr_c || !map) {
+        if (infile) fclose(infile); if (outfile) fclose(outfile);
+        return JNI_FALSE;
+    }
 
     memset(cinfo_d, 0, sizeof(struct jpeg_decompress_struct));
     memset(cinfo_c, 0, sizeof(struct jpeg_compress_struct));
@@ -90,12 +93,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
-        jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); return JNI_FALSE;
+        jpeg_destroy_decompress(cinfo_d); 
+        free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
+        fclose(infile); fclose(outfile); 
+        env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
+        return JNI_FALSE;
     }
     
     jpeg_create_decompress(cinfo_d);
-    jpeg_save_markers(cinfo_d, JPEG_APP0 + 1, 0xFFFF); 
+    // (EXIF MARKER CODE HAS BEEN PERMANENTLY REMOVED)
+
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->scale_num = 1;
@@ -110,7 +117,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); return JNI_FALSE;
+        fclose(infile); fclose(outfile); 
+        env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
+        return JNI_FALSE;
     }
     
     jpeg_create_compress(cinfo_c);
@@ -121,12 +130,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     cinfo_c->in_color_space = JCS_RGB;
     jpeg_set_defaults(cinfo_c);
     jpeg_set_quality(cinfo_c, 95, TRUE);
-
-    jpeg_saved_marker_ptr marker = cinfo_d->marker_list;
-    while (marker != NULL) {
-        jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
-        marker = marker->next;
-    }
     jpeg_start_compress(cinfo_c, TRUE);
 
     int lutMax = nativeLutSize - 1;
@@ -138,29 +141,28 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     const int* pR = &nativeLutR[0]; const int* pG = &nativeLutG[0]; const int* pB = &nativeLutB[0];
 
-    // VIGNETTE GEOMETRY PRE-CALCULATION
-    long cx = cinfo_d->output_width / 2;
-    long cy = cinfo_d->output_height / 2;
-    long max_dist_sq = cx*cx + cy*cy;
+    // VIGNETTE 64-BIT GEOMETRY (Prevents Overflow Crash)
+    long long cx = cinfo_d->output_width / 2;
+    long long cy = cinfo_d->output_height / 2;
+    long long max_dist_sq = cx*cx + cy*cy;
     if (max_dist_sq == 0) max_dist_sq = 1;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
-        long current_y = cinfo_d->output_scanline;
+        long long current_y = cinfo_d->output_scanline;
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
 
-        // VIGNETTE ROW CACHE
-        long dy = current_y - cy;
-        long dy_sq = dy * dy;
+        long long dy = current_y - cy;
+        long long dy_sq = dy * dy;
 
         for (int x = 0; x < row_stride; x += 3) {
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
 
             // 1. VIGNETTE
             if (vignette > 0) {
-                long dx = (x / 3) - cx;
-                long dist_sq = dx*dx + dy_sq;
-                int vig_mult = 256 - ((dist_sq * vignette) / max_dist_sq);
+                long long dx = (x / 3) - cx;
+                long long dist_sq = dx*dx + dy_sq;
+                int vig_mult = 256 - (int)((dist_sq * (long long)vignette) / max_dist_sq);
                 if (vig_mult < 0) vig_mult = 0;
                 origR = (origR * vig_mult) >> 8;
                 origG = (origG * vig_mult) >> 8;
@@ -171,6 +173,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             origR = rollOff(origR);
             origG = rollOff(origG);
             origB = rollOff(origB);
+
+            // HARD CLAMP: Impossible for array index to go out of bounds now
+            if (origR < 0) origR = 0; else if (origR > 255) origR = 255;
+            if (origG < 0) origG = 0; else if (origG > 255) origG = 255;
+            if (origB < 0) origB = 0; else if (origB > 255) origB = 255;
 
             // 3. LUT MATH (Tetrahedral)
             int fX = map[origR]; int fY = map[origG]; int fZ = map[origB];
@@ -226,21 +233,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
             // 5. AUTHENTIC FILM GRAIN
             if (grain > 0) {
-                // Luminance calculation (0-255)
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                // Midtone mask (strongest at 128, zero at 0/255)
                 int mask = 128 - abs(lum - 128); 
-                // Fast Random Generator
                 random_seed = (214013 * random_seed + 2531011);
-                int noise = ((random_seed >> 16) & 0xFF) - 128; // -128 to 127
-                // Apply masked noise
+                int noise = ((random_seed >> 16) & 0xFF) - 128; 
                 int grain_val = (noise * mask * grain) >> 14; 
                 outR += grain_val;
                 outG += grain_val;
                 outB += grain_val;
             }
 
-            // CLAMP AND WRITE
             row[x]   = (unsigned char)(outR < 0 ? 0 : (outR > 255 ? 255 : outR));
             row[x+1] = (unsigned char)(outG < 0 ? 0 : (outG > 255 ? 255 : outG));
             row[x+2] = (unsigned char)(outB < 0 ? 0 : (outB > 255 ? 255 : outB));
