@@ -28,7 +28,6 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -42,8 +41,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private SurfaceView mSurfaceView;
     
     private FrameLayout mainUIContainer;
-    private ScrollView menuScrollView;
-    private LinearLayout menuContainer;
+    private LinearLayout menuContainer; // NO SCROLLVIEW. Pure static grid.
     private LinearLayout[] menuRows = new LinearLayout[11];
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
@@ -73,15 +71,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
-    // FRIENDLY UI LABELS
     private final String[] intensityLabels = {"OFF", "LOW", "LOW+", "MID", "MID+", "HIGH"};
     private final String[] grainSizeLabels = {"SM", "MED", "LG"};
 
     class RTLProfile {
         int lutIndex = 0;
-        int opacity = 100; // Native 0-100%
+        int opacity = 100; 
         int grain = 0;    
-        int grainSize = 1; // 0=SM, 1=MED, 2=LG
+        int grainSize = 1; 
         int rollOff = 0;  
         int vignette = 0; 
         String whiteBalance = "AUTO";
@@ -116,7 +113,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mSurfaceView.getHolder().addCallback(this);
         mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(-1, -1));
-        setContentView(rootLayout);
+        setContentView(rootLayout); // EXPLICITLY OVERWRITES ANY OLD XML GHOST TEXT
 
         scanRecipes();
         for(int i=0; i<10; i++) profiles[i] = new RTLProfile();
@@ -151,26 +148,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        menuScrollView = new ScrollView(this);
-        menuScrollView.setBackgroundColor(Color.argb(230, 15, 15, 15));
-        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(650, 350, Gravity.CENTER);
-        
+        // STATIC FULL-SCREEN TABLE MENU
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
-        menuContainer.setPadding(20, 40, 20, 40);
-        menuScrollView.addView(menuContainer);
-
+        menuContainer.setBackgroundColor(Color.argb(245, 10, 10, 10)); // 96% Dark bg hides background artifacts completely
+        menuContainer.setPadding(30, 30, 30, 30);
+        
         for (int i = 0; i < 11; i++) {
             menuRows[i] = new LinearLayout(this);
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
-            menuRows[i].setPadding(20, 15, 20, 15);
+            menuRows[i].setGravity(Gravity.CENTER_VERTICAL);
+            
+            // WEIGHT=1 FORCES PERFECT FULL SCREEN SPACING
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);
+            menuContainer.addView(menuRows[i], rowParams);
             
             menuLabels[i] = new TextView(this);
-            menuLabels[i].setTextSize(20);
+            menuLabels[i].setTextSize(22);
             menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             
             menuValues[i] = new TextView(this);
-            menuValues[i].setTextSize(20);
+            menuValues[i].setTextSize(22);
             menuValues[i].setGravity(Gravity.RIGHT);
             
             LinearLayout.LayoutParams lpLabel = new LinearLayout.LayoutParams(0, -2, 1.0f);
@@ -178,10 +176,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             menuRows[i].addView(menuLabels[i], lpLabel);
             menuRows[i].addView(menuValues[i], lpVal);
-            menuContainer.addView(menuRows[i]);
         }
-        menuScrollView.setVisibility(View.GONE);
-        rootLayout.addView(menuScrollView, scrollParams);
+        menuContainer.setVisibility(View.GONE);
+        rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1)); // FILL SCREEN
         
         playbackContainer = new FrameLayout(this);
         playbackContainer.setBackgroundColor(Color.BLACK);
@@ -316,15 +313,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
                     else {
                         String[] parts = line.split(",");
-                        // BACKWARDS COMPATIBILITY: Handles both old backups (6 args) and new backups (7 args)
                         if (parts.length >= 6) {
                             int idx = Integer.parseInt(parts[0]);
                             int foundIndex = recipePaths.indexOf(parts[1]);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
                             profiles[idx].opacity = Integer.parseInt(parts[2]);
-                            if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100; // Old version fixer
+                            if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
-                            
                             if (parts.length == 7) {
                                 profiles[idx].grainSize = Math.min(2, Integer.parseInt(parts[4]));
                                 profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5]));
@@ -375,9 +370,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                menuScrollView.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
+                menuContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
             } else {
-                menuScrollView.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                menuContainer.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 savePreferences(); triggerLutPreload(); updateMainHUD();
             }
             return true;
@@ -387,7 +382,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
                     isPlaybackMode = true; refreshPlaybackFiles();
-                    playbackContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); menuScrollView.setVisibility(View.GONE);
+                    playbackContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); menuContainer.setVisibility(View.GONE);
                     showPlaybackImage(0); 
                 } else {
                     displayState = (displayState == 0) ? 1 : 0; mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
@@ -424,7 +419,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
                 case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
                 case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
-                // 8, 9, 10 are Placeholders
             }
         } catch (Exception e) {}
         renderMenu();
@@ -452,17 +446,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.WHITE));
             menuValues[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.CYAN));
         }
-
-        menuScrollView.post(new Runnable() {
-            @Override public void run() {
-                if (menuRows[menuSelection] != null) {
-                    int targetTop = menuRows[menuSelection].getTop();
-                    int itemHeight = menuRows[menuSelection].getHeight();
-                    int scrollHeight = menuScrollView.getHeight();
-                    menuScrollView.smoothScrollTo(0, Math.max(0, targetTop - (scrollHeight / 2) + (itemHeight / 2)));
-                }
-            }
-        });
     }
 
     private void cycleMode(int dir) {
@@ -637,11 +620,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // THE EXIF FIX: Added TAG_ORIENTATION, Blocked Image Width/Length overwriting
     private void copyExif(String sourcePath, String destPath) {
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
             android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            String[] tags = {"FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", "DateTime", "Make", "Model", "WhiteBalance", "Flash"};
+            String[] tags = {
+                ExifInterface.TAG_ORIENTATION, // CRITICAL FOR ASPECT RATIO/ROTATION FIX
+                ExifInterface.TAG_F_NUMBER,
+                ExifInterface.TAG_EXPOSURE_TIME,
+                ExifInterface.TAG_ISO,
+                ExifInterface.TAG_FOCAL_LENGTH,
+                ExifInterface.TAG_DATETIME,
+                ExifInterface.TAG_MAKE,
+                ExifInterface.TAG_MODEL,
+                ExifInterface.TAG_WHITE_BALANCE,
+                ExifInterface.TAG_FLASH
+            };
             for (String tag : tags) { String value = sourceExif.getAttribute(tag); if (value != null) destExif.setAttribute(tag, value); }
             destExif.saveAttributes();
         } catch (IOException e) {}

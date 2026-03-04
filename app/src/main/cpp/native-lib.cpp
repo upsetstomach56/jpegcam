@@ -25,11 +25,12 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// SPATIAL HASH: Generates organic film grain with ZERO repeating patterns.
-inline int spatial_noise(int x, int y, uint32_t seed) {
-    uint32_t h = seed + (uint32_t)x * 374761393 + (uint32_t)y * 668265263;
-    h = (h ^ (h >> 13)) * 1274126177;
-    return ((h ^ (h >> 16)) & 0xFF) - 128; // Returns -128 to 127
+// FAST XOR-SHIFT PRNG: Generates smooth, continuous noise without square blocks
+inline uint32_t fast_rand(uint32_t* state) {
+    uint32_t x = *state;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    *state = x;
+    return x;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -116,7 +117,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     cinfo_c->input_components = 3; cinfo_c->in_color_space = JCS_RGB;
     jpeg_set_defaults(cinfo_c); jpeg_set_quality(cinfo_c, 95, TRUE); jpeg_start_compress(cinfo_c, TRUE);
 
-    // PRE-CALCULATE MATH TO AVOID DIVISIONS
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0;
     int lutSize2 = nativeLutSize * nativeLutSize;
     for (int i = 0; i < 256; i++) { 
@@ -137,16 +137,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     int vig_mapped = (vignette * 256) / 100;
     long long vig_coef = ((long long)vig_mapped << 24) / max_dist_sq; 
-    
     int opac_mapped = (opacity * 256) / 100;
-    uint32_t master_seed = 98765;
-
-    // SCALED GRAIN LOGIC: Adapts to Resolution AND User Setting
-    int base_div = 8 / scaleDenom; 
-    if (base_div < 1) base_div = 1;
-    // grainSize is 0(SM), 1(MED), 2(LG)
-    int active_grain_div = base_div * (grainSize + 1) / 2; 
-    if (active_grain_div < 1) active_grain_div = 1;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
@@ -155,7 +146,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         
         long long dy = current_y - cy;
         long long dy_sq = dy * dy;
-        int noise_y = current_y / active_grain_div;
+
+        // Seed generator per scanline
+        uint32_t seed = 123456789 + (current_y * 1337);
+        int prev_noise = 0;
 
         for (int x = 0; x < row_stride; x += 3) {
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
@@ -209,16 +203,21 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outR = (outR * vig_mult) >> 8; outG = (outG * vig_mult) >> 8; outB = (outB * vig_mult) >> 8;
             }
 
+            // ORGANIC FILM GRAIN: Uses continuous low-pass filtering to clump naturally without digital squares
             if (grain > 0) {
-                int noise_x = (x / 3) / active_grain_div;
-                int n1 = spatial_noise(noise_x, noise_y, master_seed);
-                int n2 = spatial_noise(noise_x, noise_y, master_seed + 1);
-                int noise = (n1 + n2) / 2; 
+                int raw_noise = (fast_rand(&seed) & 0xFF) - 128; // Blazing fast bitwise PRNG (-128 to +127)
+                int noise;
+                
+                if (grainSize == 0) noise = raw_noise; // SM: Sharp pixel-level grain
+                else if (grainSize == 1) noise = (raw_noise + prev_noise) / 2; // MED: Soft 2-pixel clumping
+                else noise = (raw_noise + (prev_noise * 2)) / 3; // LG: Heavy organic silver halite clumping
+                
+                prev_noise = raw_noise;
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
                 int mask = 128 - abs(lum - 128); 
-                
                 int grain_val = (noise * mask * grain) >> 14; 
+                
                 outR += grain_val; outG += grain_val; outB += grain_val;
             }
 
