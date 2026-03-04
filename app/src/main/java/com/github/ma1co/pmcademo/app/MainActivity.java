@@ -411,6 +411,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
+            if (afOverlay != null) { afOverlay.triggerManualUpdate(); }
             return super.onKeyDown(keyCode, event); // Pass through to AF hardware
         }
 
@@ -480,7 +481,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
-            afOverlay.clearBoxes();
+            if (afOverlay != null) { afOverlay.clearBoxes(); }
             return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
@@ -706,12 +707,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
                 mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
                 mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
-                
-                // HOOK THE CUSTOM AF PROXY LISTENER
-                if (afOverlay != null) {
-                    afOverlay.hookCamera(mCameraEx);
-                }
-                
                 updateMainHUD();
             } catch (Exception e) {} 
         }
@@ -743,12 +738,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
 
     // =========================================================================
-    // CUSTOM AF HUD OVERLAY (PROXY INTERCEPTOR WITH AGGRESSIVE LOGGING)
+    // SONY NOTIFICATION MANAGER PROXY
     // =========================================================================
     private class FocusOverlayView extends View {
         private Paint greenPaint;
         private List<Object> currentRects = new ArrayList<Object>();
         
+        private Object proxyListener;
+        private Method getFocusAreaInfosMethod;
+        private Field rectListField, leftField, topField, rightField, bottomField;
+
         public FocusOverlayView(Context context) {
             super(context);
             greenPaint = new Paint();
@@ -756,29 +755,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             greenPaint.setStyle(Paint.Style.STROKE);
             greenPaint.setStrokeWidth(6);
             greenPaint.setAntiAlias(true);
-        }
 
-        public void hookCamera(CameraEx cameraEx) {
             try {
-                Log.i("COOKBOOK_AF", "Attempting to hook FocusAreaListener...");
-                Class<?> listenerInterface = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaListener");
+                // Setup the reflection fields we will need to extract the rect data later
+                Class<?> cameraExClass = Class.forName("com.sony.scalar.hardware.CameraEx");
+                getFocusAreaInfosMethod = cameraExClass.getMethod("getFocusAreaInfos");
+                
+                Class<?> infosClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaInfos");
+                rectListField = infosClass.getField("focusAreaRectInfoList");
 
-                Object proxyListener = Proxy.newProxyInstance(
+                Class<?> rectClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaRectInfo");
+                leftField = rectClass.getField("left");
+                topField = rectClass.getField("top");
+                rightField = rectClass.getField("right");
+                bottomField = rectClass.getField("bottom");
+
+                // --- THE HACK: Hooking into Sony's NotificationManager ---
+                Log.i("COOKBOOK_AF", "Setting up NotificationManager Proxy...");
+                
+                Class<?> listenerInterface = Class.forName("com.sony.imaging.app.base.common.NotificationManager$NotificationListener");
+                Class<?> notifManagerClass = Class.forName("com.sony.imaging.app.base.common.NotificationManager");
+                
+                // We create a listener that pretends to be a Sony UI component
+                proxyListener = Proxy.newProxyInstance(
                     listenerInterface.getClassLoader(),
                     new Class<?>[]{listenerInterface},
                     new InvocationHandler() {
                         @Override
                         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                            // LOG EVERYTHING THAT COMES THROUGH THE PROXY
-                            Log.i("COOKBOOK_AF", "PROXY FIRED! Method: " + method.getName());
-                            
-                            if (args != null && args.length > 0) {
-                                Log.i("COOKBOOK_AF", "Args[0] class: " + args[0].getClass().getName());
-                                
-                                // Dump all fields of whatever object the camera just handed us
-                                Field[] fields = args[0].getClass().getFields();
-                                for (Field f : fields) {
-                                    Log.i("COOKBOOK_AF", "Field found in payload: " + f.getName());
+                            // "onNotify" is the method Sony calls to broadcast events
+                            if (method.getName().equals("onNotify")) {
+                                String eventName = (String) args[0]; // e.g. "FocusChange", "AutoFocusArea"
+                                Log.i("COOKBOOK_AF", "PROXY CAUGHT EVENT: " + eventName);
+
+                                // If the camera tells us focus changed or an area was found, update immediately!
+                                if ("FocusChange".equals(eventName) || "AutoFocusArea".equals(eventName) || "DoneAutoFocus".equals(eventName)) {
+                                    triggerManualUpdate();
                                 }
                             }
                             return null;
@@ -786,23 +798,74 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     }
                 );
 
-                Method setListenerMethod = cameraEx.getClass().getMethod("setFocusAreaListener", listenerInterface);
-                setListenerMethod.invoke(cameraEx, proxyListener);
-                Log.i("COOKBOOK_AF", "Successfully injected proxy listener!");
+                // Now we register our spy listener to the system for those specific events
+                Method addListenerMethod = notifManagerClass.getMethod("addNotificationListener", String.class, listenerInterface);
+                addListenerMethod.invoke(null, "FocusChange", proxyListener);
+                addListenerMethod.invoke(null, "AutoFocusArea", proxyListener);
+                addListenerMethod.invoke(null, "DoneAutoFocus", proxyListener);
+
+                Log.i("COOKBOOK_AF", "Proxy successfully registered to NotificationManager!");
 
             } catch (Exception e) {
-                Log.e("COOKBOOK_AF", "Failed to hook listener: " + e.getMessage(), e);
+                Log.e("COOKBOOK_AF", "Failed to hook NotificationManager: " + e.getMessage(), e);
             }
         }
 
+        // We call this manually on half-press AND automatically when the proxy catches an event
+        public void triggerManualUpdate() {
+            if (mCameraEx == null || getFocusAreaInfosMethod == null) return;
+            try {
+                Object infos = getFocusAreaInfosMethod.invoke(mCameraEx);
+                if (infos != null) {
+                    currentRects = (List<Object>) rectListField.get(infos);
+                    post(new Runnable() {
+                        @Override
+                        public void run() { invalidate(); } // Force redraw
+                    });
+                }
+            } catch (Exception e) {}
+        }
+
         public void clearBoxes() {
-            currentRects.clear();
+            currentRects = new ArrayList<Object>();
             invalidate();
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+            
+            if (currentRects != null && !currentRects.isEmpty()) {
+                try {
+                    for (Object rectObj : currentRects) {
+                        int left = leftField.getInt(rectObj);
+                        int top = topField.getInt(rectObj);
+                        int right = rightField.getInt(rectObj);
+                        int bottom = bottomField.getInt(rectObj);
+
+                        float dLeft, dTop, dRight, dBottom;
+
+                        if (right <= 100 && bottom <= 100) { 
+                            dLeft = (left / 100f) * getWidth();
+                            dTop = (top / 100f) * getHeight();
+                            dRight = (right / 100f) * getWidth();
+                            dBottom = (bottom / 100f) * getHeight();
+                        } else if (right <= 1000 && bottom <= 1000) { 
+                            dLeft = ((left + 1000) / 2000f) * getWidth();
+                            dTop = ((top + 1000) / 2000f) * getHeight();
+                            dRight = ((right + 1000) / 2000f) * getWidth();
+                            dBottom = ((bottom + 1000) / 2000f) * getHeight();
+                        } else { 
+                            dLeft = (left / 6000f) * getWidth();
+                            dTop = (top / 4000f) * getHeight();
+                            dRight = (right / 6000f) * getWidth();
+                            dBottom = (bottom / 4000f) * getHeight();
+                        }
+
+                        canvas.drawRect(dLeft, dTop, dRight, dBottom, greenPaint);
+                    }
+                } catch (Exception e) {}
+            }
         }
     }
 }
