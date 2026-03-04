@@ -1,10 +1,13 @@
 package com.github.ma1co.pmcademo.app;
 
+import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -21,6 +24,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -28,13 +32,13 @@ import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 import java.io.*;
 import java.util.ArrayList;
-import java.util.List; // RESTORED IMPORT - Fixes the compilation error!
+import java.util.List; 
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
     private Camera mCamera;
     private SurfaceView mSurfaceView;
-    private boolean hasSurface = false; // Tracks hardware state for Sleep/Wake
+    private boolean hasSurface = false; 
     
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
@@ -43,6 +47,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
     private TextView tvBottomBar, tvTopStatus; 
+    
+    // RESTORED: Playback UI Elements
+    private FrameLayout playbackContainer;
+    private ImageView playbackImageView;
+    private TextView tvPlaybackInfo;
+    private List<File> playbackFiles = new ArrayList<File>();
+    private int playbackIndex = 0;
+    private Bitmap currentPlaybackBitmap = null;
+    private boolean isPlaybackMode = false;
     
     private boolean isProcessing = false;
     private boolean isReady = false; 
@@ -65,9 +78,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     class RTLProfile {
         int lutIndex = 0;
-        int opacity = 100; // 0-100%
+        int opacity = 100; 
         int grain = 0;    
-        int grainSize = 1; // 0=SM, 1=MED, 2=LG
+        int grainSize = 1; 
         int rollOff = 0;  
         int vignette = 0; 
         String whiteBalance = "AUTO";
@@ -171,31 +184,101 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuScrollView.setVisibility(View.GONE);
         rootLayout.addView(menuScrollView, new FrameLayout.LayoutParams(-1, -1));
 
+        // RESTORED: Custom Playback Container UI
+        playbackContainer = new FrameLayout(this);
+        playbackContainer.setBackgroundColor(Color.BLACK);
+        playbackContainer.setVisibility(View.GONE);
+        
+        playbackImageView = new ImageView(this);
+        playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvPlaybackInfo = new TextView(this);
+        tvPlaybackInfo.setTextColor(Color.WHITE);
+        tvPlaybackInfo.setTextSize(18);
+        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK);
+        FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
+        pbInfoParams.setMargins(0, 30, 30, 0);
+        playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
+        
+        rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
+
         updateMainHUD();
         renderMenu();
     }
 
-    private void launchNativeGallery() {
+    // --- RESTORED & UPGRADED: Buttery Smooth Playback Engine ---
+    private void refreshPlaybackFiles() {
+        playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
         if (outDir.exists() && outDir.listFiles() != null) {
-            File newest = null;
-            long maxMod = 0;
             for (File f : outDir.listFiles()) {
-                if (f.getName().toUpperCase().endsWith(".JPG") && f.lastModified() > maxMod) {
-                    maxMod = f.lastModified(); newest = f;
-                }
-            }
-            if (newest != null) {
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(Uri.fromFile(newest), "image/jpeg");
-                try {
-                    startActivity(intent);
-                    return; 
-                } catch (Exception e) {}
+                if (f.getName().toUpperCase().endsWith(".JPG")) playbackFiles.add(f);
             }
         }
-        tvTopStatus.setText("NO GRADED PHOTOS");
-        tvTopStatus.setTextColor(Color.RED);
+        java.util.Collections.sort(playbackFiles, new java.util.Comparator<File>() {
+            public int compare(File f1, File f2) { return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified()); }
+        });
+    }
+
+    private void showPlaybackImage(int index) {
+        if (playbackFiles.isEmpty()) { tvTopStatus.setText("NO GRADED PHOTOS"); return; }
+        
+        if (index < 0) index = 0;
+        if (index >= playbackFiles.size()) index = playbackFiles.size() - 1;
+        playbackIndex = index;
+        File imgFile = playbackFiles.get(playbackIndex);
+        
+        if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
+        }
+        
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inJustDecodeBounds = true; 
+        BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+        
+        // 1. Safe Ram Extraction (We keep the image slightly larger than the screen to preserve detail)
+        int scale = 1; 
+        while ((options.outWidth / scale) > 1600 || (options.outHeight / scale) > 1600) { scale *= 2; }
+        options.inJustDecodeBounds = false; 
+        options.inSampleSize = scale;
+        
+        try {
+            Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
+            int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            int rotationAngle = 0;
+            if (orientation == ExifInterface.ORIENTATION_ROTATE_90) rotationAngle = 90;
+            else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) rotationAngle = 180;
+            else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) rotationAngle = 270;
+            
+            Matrix matrix = new Matrix(); 
+            if (rotationAngle != 0) matrix.postRotate(rotationAngle);
+            
+            // 2. THE MAGIC SMOOTHING FIX: Hardware Bilinear Filter
+            // This mathematically scales the safety-buffer image down to exactly fit your camera LCD
+            // without dropping pixels, eliminating the "rough/jagged" look entirely.
+            float targetWidth = (rotationAngle == 90 || rotationAngle == 270) ? 480.0f : 640.0f;
+            float ratio = targetWidth / rawBitmap.getWidth();
+            if (ratio < 1.0f) matrix.postScale(ratio, ratio);
+
+            // The 'true' at the end triggers the Bilinear Anti-Aliasing!
+            currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true); 
+            if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
+            
+            playbackImageView.setImageBitmap(currentPlaybackBitmap);
+            tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
+            
+        } catch (Exception e) { tvPlaybackInfo.setText("DECODE ERROR"); }
+    }
+
+    private void exitPlayback() {
+        playbackContainer.setVisibility(View.GONE);
+        mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+        isPlaybackMode = false;
+        if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
+        }
     }
 
     private File getLutDir() {
@@ -304,6 +387,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true; 
         }
 
+        // RESTORED: D-Pad scrubbing for Custom Playback Mode
+        if (isPlaybackMode) {
+            if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
+            if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
+            if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU || sc == ScalarInput.ISV_KEY_PLAY) { exitPlayback(); return true; }
+            return true; 
+        }
+
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
@@ -317,7 +408,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
-                if (mDialMode == DialMode.review) { launchNativeGallery(); } 
+                if (mDialMode == DialMode.review) {
+                    // RESTORED: Fire the custom smooth viewer
+                    isPlaybackMode = true; 
+                    refreshPlaybackFiles();
+                    playbackContainer.setVisibility(View.VISIBLE); 
+                    mainUIContainer.setVisibility(View.GONE); 
+                    menuScrollView.setVisibility(View.GONE);
+                    showPlaybackImage(0); 
+                } 
                 else {
                     displayState = (displayState == 0) ? 1 : 0; 
                     mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
@@ -585,7 +684,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (IOException e) {}
     }
 
-    // --- HARDWARE LIFECYCLE MANAGEMENT FOR AUTO-RESUME ---
     private void openCamera() {
         if (mCameraEx == null && hasSurface) {
             try { 
