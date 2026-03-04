@@ -5,8 +5,10 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -30,13 +32,15 @@ import android.widget.TextView;
 import android.content.Context;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.util.List;
 
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 
 import java.io.*;
 import java.util.ArrayList;
-import java.util.List; 
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
@@ -72,6 +76,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
     
+    private FocusOverlayView afOverlay;
+
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
@@ -151,6 +157,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
+
+        afOverlay = new FocusOverlayView(this);
+        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
@@ -393,48 +402,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // =========================================================================
-    // THE NEW DIAGNOSTIC PROBE (HUNTING FOR HIDDEN LISTENERS)
-    // =========================================================================
-    private void huntForAfListeners() {
-        Log.i("COOKBOOK_AF_DIAG", "--- HUNTING FOR CAMERAEX LISTENERS ---");
-        try {
-            if (mCameraEx != null) {
-                Method[] methods = mCameraEx.getClass().getMethods();
-                for (Method m : methods) {
-                    String name = m.getName().toLowerCase();
-                    // We want to find any method related to Focus, Rectangles, or Listeners
-                    if (name.contains("focus") || name.contains("rect") || name.contains("listener") || name.contains("callback")) {
-                        Log.i("COOKBOOK_AF_DIAG", "Found CameraEx Method: " + m.getName());
-                    }
-                }
-                
-                // Let's also check the hidden nested classes inside CameraEx
-                Class<?>[] classes = mCameraEx.getClass().getDeclaredClasses();
-                for (Class<?> c : classes) {
-                    Log.i("COOKBOOK_AF_DIAG", "Found Nested Class: " + c.getName());
-                }
-            }
-        } catch (Throwable t) {
-            Log.e("COOKBOOK_AF_DIAG", "Hunting failed: " + t.getMessage());
-        }
-        Log.i("COOKBOOK_AF_DIAG", "--- END HUNT ---");
-    }
-
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // IMMERSIVE MODE & AF PROBE (HALF-PRESS)
-        if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
+        // IMMERSIVE MODE & SHUTTER OVERRIDE
+        if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            
-            // FIRE THE PROBE!
-            huntForAfListeners();
-            
-            return super.onKeyDown(keyCode, event);
+            return super.onKeyDown(keyCode, event); // Pass through to AF hardware
         }
 
         if (sc == ScalarInput.ISV_KEY_DELETE) { 
@@ -497,12 +474,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // IMMERSIVE MODE (HALF-PRESS RELEASE)
+        // RESTORE IMMERSIVE MODE & CLEAR BOXES
         if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
+            afOverlay.clearBoxes();
             return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
@@ -728,6 +706,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
                 mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
                 mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
+                
+                // HOOK THE CUSTOM AF PROXY LISTENER
+                if (afOverlay != null) {
+                    afOverlay.hookCamera(mCameraEx);
+                }
+                
                 updateMainHUD();
             } catch (Exception e) {} 
         }
@@ -756,4 +740,122 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { updateMainHUD(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
+
+
+    // =========================================================================
+    // CUSTOM AF HUD OVERLAY (PROXY INTERCEPTOR)
+    // =========================================================================
+    private class FocusOverlayView extends View {
+        private Paint greenPaint;
+        private List<Object> currentRects = new ArrayList<Object>();
+        
+        // Cached reflection fields for speed
+        private Field leftField, topField, rightField, bottomField;
+
+        public FocusOverlayView(Context context) {
+            super(context);
+            greenPaint = new Paint();
+            greenPaint.setColor(Color.GREEN);
+            greenPaint.setStyle(Paint.Style.STROKE);
+            greenPaint.setStrokeWidth(6);
+            greenPaint.setAntiAlias(true);
+
+            try {
+                Class<?> rectClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaRectInfo");
+                leftField = rectClass.getField("left");
+                topField = rectClass.getField("top");
+                rightField = rectClass.getField("right");
+                bottomField = rectClass.getField("bottom");
+            } catch (Exception e) {}
+        }
+
+        public void hookCamera(CameraEx cameraEx) {
+            try {
+                // Find the listener interface
+                Class<?> listenerInterface = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaListener");
+
+                // Create a proxy object that implements the listener interface
+                Object proxyListener = Proxy.newProxyInstance(
+                    listenerInterface.getClassLoader(),
+                    new Class<?>[]{listenerInterface},
+                    new InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                            if (method.getName().equals("onFocusAreaInfo")) {
+                                // args[0] is FocusAreaInfos
+                                Object focusAreaInfos = args[0];
+                                if (focusAreaInfos != null) {
+                                    // Extract the ArrayList of Rects
+                                    Field rectListField = focusAreaInfos.getClass().getField("focusAreaRectInfoList");
+                                    currentRects = (List<Object>) rectListField.get(focusAreaInfos);
+                                    
+                                    // Force the UI to redraw immediately on the main thread
+                                    post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            invalidate();
+                                        }
+                                    });
+                                }
+                            }
+                            return null;
+                        }
+                    }
+                );
+
+                // Inject our proxy listener into the live CameraEx object
+                Method setListenerMethod = cameraEx.getClass().getMethod("setFocusAreaListener", listenerInterface);
+                setListenerMethod.invoke(cameraEx, proxyListener);
+
+            } catch (Exception e) {}
+        }
+
+        public void clearBoxes() {
+            currentRects.clear();
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            
+            if (currentRects != null && !currentRects.isEmpty()) {
+                try {
+                    for (Object rectObj : currentRects) {
+                        int left = leftField.getInt(rectObj);
+                        int top = topField.getInt(rectObj);
+                        int right = rightField.getInt(rectObj);
+                        int bottom = bottomField.getInt(rectObj);
+
+                        // The coordinates coming out of FocusAreaInfos are usually Absolute Matrix (-1000 to +1000)
+                        // but sometimes they are absolute sensor pixels. We use our dynamic math to be safe.
+                        
+                        float dLeft, dTop, dRight, dBottom;
+
+                        if (right <= 100 && bottom <= 100) { 
+                            // Percentages
+                            dLeft = (left / 100f) * getWidth();
+                            dTop = (top / 100f) * getHeight();
+                            dRight = (right / 100f) * getWidth();
+                            dBottom = (bottom / 100f) * getHeight();
+                        } else if (right <= 1000 && bottom <= 1000) { 
+                            // Matrix
+                            dLeft = ((left + 1000) / 2000f) * getWidth();
+                            dTop = ((top + 1000) / 2000f) * getHeight();
+                            dRight = ((right + 1000) / 2000f) * getWidth();
+                            dBottom = ((bottom + 1000) / 2000f) * getHeight();
+                        } else { 
+                            // Absolute Sensor Pixels (Approximated 6000x4000)
+                            dLeft = (left / 6000f) * getWidth();
+                            dTop = (top / 4000f) * getHeight();
+                            dRight = (right / 6000f) * getWidth();
+                            dBottom = (bottom / 4000f) * getHeight();
+                        }
+
+                        canvas.drawRect(dLeft, dTop, dRight, dBottom, greenPaint);
+                    }
+                } catch (Exception e) {}
+            }
+        }
+    }
 }
