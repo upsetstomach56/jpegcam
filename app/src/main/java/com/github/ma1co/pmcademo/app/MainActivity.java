@@ -133,7 +133,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // Menu Overlay (With ScrollView to prevent cutoffs)
+        // Menu Overlay
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
         FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(600, 350, Gravity.CENTER);
@@ -217,16 +217,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (!isProcessing) {
             if (isMenuOpen) {
+                // NAVIGATE MENU
                 if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 7) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleMenuChange(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleMenuChange(1); return true; }
             } else {
-                // Main Screen Navigation
-                if (sc == ScalarInput.ISV_KEY_UP) { cycleMode(-1); return true; }
-                if (sc == ScalarInput.ISV_KEY_DOWN) { cycleMode(1); return true; }
-                if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
-                if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
+                // INTUITIVE MAIN SCREEN NAVIGATION
+                // Left/Right toggles the active text horizontally
+                if (sc == ScalarInput.ISV_KEY_LEFT) { cycleMode(-1); return true; }
+                if (sc == ScalarInput.ISV_KEY_RIGHT) { cycleMode(1); return true; }
+                
+                // Up/Down/Dial changes the value of the active item
+                if (sc == ScalarInput.ISV_KEY_UP || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
+                if (sc == ScalarInput.ISV_KEY_DOWN || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
             }
         }
         return super.onKeyDown(keyCode, event);
@@ -266,7 +270,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuItems[i].setTextColor(i == menuSelection ? Color.GREEN : Color.WHITE);
         }
 
-        // PERFECT AUTO-CENTERING SCROLL LOGIC
         menuScrollView.post(new Runnable() {
             @Override
             public void run() {
@@ -274,7 +277,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     int targetTop = menuItems[menuSelection].getTop();
                     int itemHeight = menuItems[menuSelection].getHeight();
                     int scrollHeight = menuScrollView.getHeight();
-                    // Calculates exact Y position to put the highlighted text in the absolute center
                     int scrollY = targetTop - (scrollHeight / 2) + (itemHeight / 2);
                     menuScrollView.smoothScrollTo(0, Math.max(0, scrollY));
                 }
