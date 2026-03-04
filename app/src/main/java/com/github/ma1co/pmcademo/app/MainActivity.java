@@ -225,7 +225,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
         
         try {
-            // 1. EXTRACT EXIF METADATA
+            // EXIF EXTRACTION
             ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
             String fnum = exif.getAttribute("FNumber");
             String speed = exif.getAttribute("ExposureTime");
@@ -248,20 +248,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                               + apStr + " | " + speedStr + " | " + isoStr;
             tvPlaybackInfo.setText(metaText);
 
-            // 2. DYNAMICALLY SCALE THE THUMBNAIL FOR MAXIMUM SHARPNESS
+            // DYNAMIC LCD THUMBNAIL SCALING (Sharp images, no pixelation)
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inJustDecodeBounds = true; 
             BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             
             int scale = 1; 
-            // Ensures the generated preview matches the LCD screen size closely without crushing memory
             while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) { 
                 scale *= 2; 
             }
             
             options.inJustDecodeBounds = false; 
             options.inSampleSize = scale;
-            options.inPreferQualityOverSpeed = true; // Use Bilinear filtering!
+            options.inPreferQualityOverSpeed = true; 
             
             Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             
@@ -273,9 +272,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             Matrix matrix = new Matrix(); 
             if (rotationAngle != 0) matrix.postRotate(rotationAngle);
-            matrix.postScale(0.8888f, 1.0f); // SONY LCD ANAMORPHIC FIX
+            matrix.postScale(0.8888f, 1.0f); 
 
-            // The 'true' flag here enforces high-quality filtering during the matrix scale
             currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true); 
             if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
             
