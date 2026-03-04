@@ -40,12 +40,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private Camera mCamera;
     private SurfaceView mSurfaceView;
     
+    // UI Elements
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
     private LinearLayout menuContainer;
     private TextView tvBottomBar, tvTopStatus; 
-    private TextView[] menuItems = new TextView[7];
+    private TextView[] menuItems = new TextView[10]; // Expanded for 10 items
     
+    // Playback Elements
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
     private TextView tvPlaybackInfo;
@@ -53,6 +55,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int playbackIndex = 0;
     private Bitmap currentPlaybackBitmap = null;
     
+    // State & Engine
     private boolean isProcessing = false;
     private boolean isReady = false; 
     private boolean isMenuOpen = false;
@@ -68,12 +71,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private long lastNewestFileTime = 0;
     private ArrayList<String> recipeList = new ArrayList<String>();
 
+    // --- RTL Profile with 0-5 Scales ---
     class RTLProfile {
         int lutIndex = 0;
-        int opacity = 100;
-        int grain = 0;
-        int vignette = 0;
-        int rollOff = 0;
+        int opacity = 5;  
+        int grain = 0;    
+        int rollOff = 0;  
+        int vignette = 0; 
+        
+        // SONY PLACEHOLDERS
+        String whiteBalance = "AUTO";
+        int wbShift = 0;
+        String dro = "OFF";
     }
     
     private RTLProfile[] profiles = new RTLProfile[10];
@@ -144,14 +153,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
-        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(600, 350, Gravity.CENTER);
+        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(650, 350, Gravity.CENTER);
         
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
         menuContainer.setPadding(40, 40, 40, 40);
         menuScrollView.addView(menuContainer);
 
-        for (int i = 0; i < 7; i++) {
+        // Build 10 Menu Items
+        for (int i = 0; i < 10; i++) {
             menuItems[i] = new TextView(this);
             menuItems[i].setTextSize(20);
             menuItems[i].setPadding(0, 12, 0, 12);
@@ -222,7 +232,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
-        // Target high-quality preview width (~1200px)
         int scale = 1;
         while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) {
             scale *= 2;
@@ -234,7 +243,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             
-            // EXIF ROTATION FIX: Prevents Portrait photos from looking squished!
             ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
             int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rotationAngle = 0;
@@ -335,15 +343,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             String lutName = parts[1];
                             int foundIndex = recipeList.indexOf(lutName);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
-                            profiles[idx].opacity = Integer.parseInt(parts[2]);
-                            profiles[idx].grain = Integer.parseInt(parts[3]);
-                            profiles[idx].rollOff = Integer.parseInt(parts[4]);
-                            profiles[idx].vignette = Integer.parseInt(parts[5]);
+                            // Math.min forces old 0-100 values to safely cap at 5
+                            profiles[idx].opacity = Math.min(5, Integer.parseInt(parts[2]));
+                            profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
+                            profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4]));
+                            profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
                         }
                     }
                 }
                 br.close();
-                savePreferences(); // Seal the backup into the fresh install
+                savePreferences(); 
                 return;
             } catch (Exception e) {}
         }
@@ -354,10 +363,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String savedLutName = prefs.getString("slot_" + i + "_lutName", "NONE");
             int foundIndex = recipeList.indexOf(savedLutName);
             profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
-            profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100);
-            profiles[i].grain = prefs.getInt("slot_" + i + "_grain", 0);
-            profiles[i].rollOff = prefs.getInt("slot_" + i + "_roll", 0);
-            profiles[i].vignette = prefs.getInt("slot_" + i + "_vig", 0);
+            profiles[i].opacity = Math.min(5, prefs.getInt("slot_" + i + "_opac", 5));
+            profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0));
+            profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0));
+            profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
         }
     }
 
@@ -393,6 +402,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
+        // ISV_KEY_ENTER for toggling review or clean screen
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
@@ -412,8 +422,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (!isProcessing) {
             if (isMenuOpen) {
-                if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 7) % 7; renderMenu(); return true; }
-                if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 7; renderMenu(); return true; }
+                if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 10) % 10; renderMenu(); return true; }
+                if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 10; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleMenuChange(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleMenuChange(1); return true; }
             } else {
@@ -428,16 +438,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void handleMenuChange(int dir) {
         RTLProfile p = profiles[currentSlot];
-        int d10 = dir * 10; 
         try {
             switch(menuSelection) {
                 case 0: qualityIndex = (qualityIndex + dir + 3) % 3; break;
                 case 1: currentSlot = (currentSlot + dir + 10) % 10; break; 
                 case 2: p.lutIndex = (p.lutIndex + dir + recipeList.size()) % recipeList.size(); break;
-                case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + d10)); break;
-                case 4: p.grain = Math.max(0, Math.min(100, p.grain + d10)); break;
-                case 5: p.rollOff = Math.max(0, Math.min(100, p.rollOff + d10)); break;
-                case 6: p.vignette = Math.max(0, Math.min(100, p.vignette + d10)); break;
+                case 3: p.opacity = Math.max(0, Math.min(5, p.opacity + dir)); break;
+                case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
+                case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
+                case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                // 7, 8, 9 are Placeholders
             }
         } catch (Exception e) {}
         renderMenu();
@@ -451,15 +461,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuItems[0].setText("Global Quality: < " + qLabels[qualityIndex] + " >");
         menuItems[1].setText("RTL Slot: < " + (currentSlot + 1) + " >");
         menuItems[2].setText("LUT: < " + lutName + " >");
-        menuItems[3].setText("Opacity: < " + p.opacity + "% >");
+        menuItems[3].setText("Opacity: < " + p.opacity + " >");
         menuItems[4].setText("Grain: < " + p.grain + " >");
         menuItems[5].setText("Highlight Roll: < " + p.rollOff + " >");
         menuItems[6].setText("Vignette: < " + p.vignette + " >");
+        
+        // PLACEHOLDERS RESTORED
+        menuItems[7].setText("[LOCKED] W.Bal: < " + p.whiteBalance + " >");
+        menuItems[8].setText("[LOCKED] WB Shift: < " + p.wbShift + " >");
+        menuItems[9].setText("[LOCKED] DRO: < " + p.dro + " >");
 
-        for (int i = 0; i < 7; i++) {
-            menuItems[i].setTextColor(i == menuSelection ? Color.GREEN : Color.WHITE);
+        for (int i = 0; i < 10; i++) {
+            menuItems[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
         }
 
+        // PERFECT AUTO-CENTERING SCROLL LOGIC
         menuScrollView.post(new Runnable() {
             @Override
             public void run() {
@@ -632,7 +648,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File outFile = new File(outDir, original.getName());
 
                 RTLProfile p = profiles[currentSlot];
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain, p.vignette, p.rollOff)) {
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity * 20, p.grain * 20, p.vignette * 20, p.rollOff * 20)) {
                     copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));

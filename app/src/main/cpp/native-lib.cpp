@@ -8,10 +8,10 @@
 #include <android/log.h>
 
 #define LOG_TAG "COOKBOOK_LOG"
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 std::vector<int> nativeLutR, nativeLutG, nativeLutB;
 int nativeLutSize = 0;
-uint32_t random_seed = 12345;
 
 struct my_error_mgr {
     struct jpeg_error_mgr pub;
@@ -25,10 +25,17 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// The User-Approved Fast Pseudo-Random Generator
-inline int fast_rand() {
-    random_seed = (214013 * random_seed + 2531011);
-    return (random_seed >> 16) & 0xFF;
+// Fast Highlight Roll-Off
+inline int rollOff(int v) {
+    if (v > 200) return 200 + ((v - 200) * (310 - v)) / 110;
+    return v;
+}
+
+// SPATIAL HASH: Generates organic film grain with ZERO repeating patterns.
+inline int spatial_noise(int x, int y, uint32_t seed) {
+    uint32_t h = seed + (uint32_t)x * 374761393 + (uint32_t)y * 668265263;
+    h = (h ^ (h >> 13)) * 1274126177;
+    return ((h ^ (h >> 16)) & 0xFF) - 128; // Returns -128 to 127
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -61,7 +68,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath, jint scaleDenom, jint opacity, jint grain, jint vignette, jint rolloff) {
-    
     bool hasLut = (nativeLutSize > 0);
 
     const char *in_file = env->GetStringUTFChars(inPath, NULL);
@@ -90,10 +96,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     cinfo_d->err = jpeg_std_error(&jerr_d->pub);
     jerr_d->pub.error_exit = my_error_exit;
+    jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
         jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); return JNI_FALSE;
+        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
+        return JNI_FALSE;
     }
     
     jpeg_create_decompress(cinfo_d);
@@ -106,11 +114,13 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     cinfo_c->err = jpeg_std_error(&jerr_c->pub);
     jerr_c->pub.error_exit = my_error_exit;
+    jerr_c->pub.emit_message = my_emit_message; jerr_c->pub.output_message = my_output_message;
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); return JNI_FALSE;
+        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
+        return JNI_FALSE;
     }
     
     jpeg_create_compress(cinfo_c);
@@ -141,13 +151,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     int vig_mapped = (vignette * 256) / 100;
     int opac_mapped = (opacity * 256) / 100;
+    uint32_t master_seed = 98765;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
-        
-        // SEED RESET: Eliminates any diagonal 2D patterns
-        random_seed = 12345 + (current_y * 1337); 
-
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
         long long dy = current_y - cy;
@@ -157,7 +164,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
             int outR = origR, outG = origG, outB = origB;
 
-            // 1. LUT INTERPOLATION & OPACITY
             if (hasLut) {
                 int fX = map[origR]; int fY = map[origG]; int fZ = map[origB];
                 int x0 = fX >> 7; int y0 = fY >> 7; int z0 = fZ >> 7;
@@ -165,7 +171,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 int y1 = y0 + 1; if (y1 > lutMax) y1 = lutMax;
                 int z1 = z0 + 1; if (z1 > lutMax) z1 = lutMax;
 
-                int dx = fX & 0x7F; int dy = fY & 0x7F; int dz = fZ & 0x7F;
+                int dx = fX & 0x7F; int dy_lut = fY & 0x7F; int dz = fZ & 0x7F;
                 int y0_idx = y0 * nativeLutSize; int y1_idx = y1 * nativeLutSize;
                 int z0_idx = z0 * lutSize2;      int z1_idx = z1 * lutSize2;
 
@@ -175,14 +181,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 int i011 = x0 + y1_idx + z1_idx; int i111 = x1 + y1_idx + z1_idx;
 
                 int v0, v1, v2, v3, w0, w1, w2, w3;
-                if (dx >= dy) {
-                    if (dy >= dz) { v0=i000; v1=i100; v2=i110; v3=i111; w0=128-dx; w1=dx-dy; w2=dy-dz; w3=dz; } 
-                    else if (dx >= dz) { v0=i000; v1=i100; v2=i101; v3=i111; w0=128-dx; w1=dx-dz; w2=dz-dy; w3=dy; } 
-                    else { v0=i000; v1=i001; v2=i101; v3=i111; w0=128-dz; w1=dz-dx; w2=dx-dy; w3=dy; }
+                if (dx >= dy_lut) {
+                    if (dy_lut >= dz) { v0=i000; v1=i100; v2=i110; v3=i111; w0=128-dx; w1=dx-dy_lut; w2=dy_lut-dz; w3=dz; } 
+                    else if (dx >= dz) { v0=i000; v1=i100; v2=i101; v3=i111; w0=128-dx; w1=dx-dz; w2=dz-dy_lut; w3=dy_lut; } 
+                    else { v0=i000; v1=i001; v2=i101; v3=i111; w0=128-dz; w1=dz-dx; w2=dx-dy_lut; w3=dy_lut; }
                 } else {
-                    if (dz >= dy) { v0=i000; v1=i001; v2=i011; v3=i111; w0=128-dz; w1=dz-dy; w2=dy-dx; w3=dx; } 
-                    else if (dz >= dx) { v0=i000; v1=i010; v2=i011; v3=i111; w0=128-dy; w1=dy-dz; w2=dz-dx; w3=dx; } 
-                    else { v0=i000; v1=i010; v2=i110; v3=i111; w0=128-dy; w1=dy-dx; w2=dx-dz; w3=dz; }
+                    if (dz >= dy_lut) { v0=i000; v1=i001; v2=i011; v3=i111; w0=128-dz; w1=dz-dy_lut; w2=dy_lut-dx; w3=dx; } 
+                    else if (dz >= dx) { v0=i000; v1=i010; v2=i011; v3=i111; w0=128-dy_lut; w1=dy_lut-dz; w2=dz-dx; w3=dx; } 
+                    else { v0=i000; v1=i010; v2=i110; v3=i111; w0=128-dy_lut; w1=dy_lut-dx; w2=dx-dz; w3=dz; }
                 }
 
                 int lutR = (pR[v0]*w0 + pR[v1]*w1 + pR[v2]*w2 + pR[v3]*w3) >> 7;
@@ -198,14 +204,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 }
             }
 
-            // 2. HIGHLIGHT ROLL-OFF
             if (rolloff > 0) {
                 if (outR > 200) outR -= ((outR - 200) * (outR - 200) * rolloff) / 11000;
                 if (outG > 200) outG -= ((outG - 200) * (outG - 200) * rolloff) / 11000;
                 if (outB > 200) outB -= ((outB - 200) * (outB - 200) * rolloff) / 11000;
             }
 
-            // 3. OPTICAL VIGNETTE
             if (vignette > 0) {
                 long long cur_dx = (x / 3) - cx;
                 long long dist_sq = cur_dx*cur_dx + dy_sq;
@@ -216,10 +220,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outB = (outB * vig_mult) >> 8;
             }
 
-            // 4. THE MAGIC GAUSSIAN GRAIN (Restored)
+            // AUTHENTIC GAUSSIAN GRAIN (Triangle Distribution via 2 spatial hashes)
             if (grain > 0) {
-                int n1 = fast_rand(); int n2 = fast_rand(); int n3 = fast_rand();
-                int noise = ((n1 + n2 + n3) / 3) - 128; 
+                int n1 = spatial_noise(x, current_y, master_seed);
+                int n2 = spatial_noise(x, current_y, master_seed + 1);
+                int noise = (n1 + n2) / 2; // Combines randoms to form a Bell Curve
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
                 int mask = 128 - abs(lum - 128); 
@@ -230,7 +235,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outB += grain_val;
             }
 
-            // 5. HARD CLAMP
             row[x]   = (unsigned char)(outR < 0 ? 0 : (outR > 255 ? 255 : outR));
             row[x+1] = (unsigned char)(outG < 0 ? 0 : (outG > 255 ? 255 : outG));
             row[x+2] = (unsigned char)(outB < 0 ? 0 : (outB > 255 ? 255 : outB));
