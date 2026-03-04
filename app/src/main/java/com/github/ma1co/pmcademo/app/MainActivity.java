@@ -394,82 +394,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     // =========================================================================
-    // THE DIAGNOSTIC PROBE
+    // THE NEW DIAGNOSTIC PROBE (HUNTING FOR HIDDEN LISTENERS)
     // =========================================================================
-    private void runAfDiagnostics() {
-        Log.i("COOKBOOK_AF_DIAG", "--- STARTING AF DIAGNOSTICS ---");
-
-        // TEST 1: Standard Android Camera API Parameters
+    private void huntForAfListeners() {
+        Log.i("COOKBOOK_AF_DIAG", "--- HUNTING FOR CAMERAEX LISTENERS ---");
         try {
-            if (mCamera != null) {
-                Camera.Parameters params = mCamera.getParameters();
-                Log.i("COOKBOOK_AF_DIAG", "Test 1: Standard Android Parameters");
-                Log.i("COOKBOOK_AF_DIAG", "FocusMode: " + params.getFocusMode());
-                if (params.getMaxNumFocusAreas() > 0) {
-                    List<Camera.Area> focusAreas = params.getFocusAreas();
-                    if (focusAreas != null) {
-                        Log.i("COOKBOOK_AF_DIAG", "FocusAreas found: " + focusAreas.size());
-                        for (Camera.Area a : focusAreas) {
-                            Log.i("COOKBOOK_AF_DIAG", "Area: " + a.rect.toString() + " weight: " + a.weight);
-                        }
-                    } else {
-                        Log.i("COOKBOOK_AF_DIAG", "FocusAreas supported but returned null.");
-                    }
-                } else {
-                    Log.i("COOKBOOK_AF_DIAG", "MaxNumFocusAreas is 0 (Not supported by standard API).");
-                }
-            }
-        } catch (Throwable t) {
-            Log.e("COOKBOOK_AF_DIAG", "Test 1 Failed: " + t.getMessage());
-        }
-
-        // TEST 2: Standard AutoFocus Callback
-        try {
-            if (mCamera != null) {
-                Log.i("COOKBOOK_AF_DIAG", "Test 2: Requesting Standard autoFocus callback");
-                mCamera.autoFocus(new Camera.AutoFocusCallback() {
-                    @Override
-                    public void onAutoFocus(boolean success, Camera camera) {
-                        Log.i("COOKBOOK_AF_DIAG", "Standard AF Callback Result: " + success);
-                    }
-                });
-            }
-        } catch (Throwable t) {
-            Log.e("COOKBOOK_AF_DIAG", "Test 2 Failed: " + t.getMessage());
-        }
-
-        // TEST 3: Sony FocusController Reflection
-        try {
-            Log.i("COOKBOOK_AF_DIAG", "Test 3: Checking com.sony.scalar.sysutil.FocusController");
-            Class<?> fcClass = Class.forName("com.sony.scalar.sysutil.FocusController");
-            Log.i("COOKBOOK_AF_DIAG", "FocusController class found!");
-            Method[] methods = fcClass.getDeclaredMethods();
-            for (Method m : methods) {
-                if (m.getName().toLowerCase().contains("af") || m.getName().toLowerCase().contains("focus")) {
-                    Log.i("COOKBOOK_AF_DIAG", "Found method: " + m.getName());
-                }
-            }
-        } catch (Throwable t) {
-            Log.e("COOKBOOK_AF_DIAG", "Test 3 Failed (Class not found): " + t.getMessage());
-        }
-
-        // TEST 4: CameraEx.ParametersModifier AF Methods
-        try {
-            Log.i("COOKBOOK_AF_DIAG", "Test 4: Checking CameraEx.ParametersModifier for AF methods");
-            if (mCameraEx != null && mCamera != null) {
-                CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCamera.getParameters());
-                Method[] methods = pm.getClass().getDeclaredMethods();
+            if (mCameraEx != null) {
+                Method[] methods = mCameraEx.getClass().getMethods();
                 for (Method m : methods) {
-                    if (m.getName().toLowerCase().contains("focus") || m.getName().toLowerCase().contains("af")) {
-                        Log.i("COOKBOOK_AF_DIAG", "Found modifier method: " + m.getName());
+                    String name = m.getName().toLowerCase();
+                    // We want to find any method related to Focus, Rectangles, or Listeners
+                    if (name.contains("focus") || name.contains("rect") || name.contains("listener") || name.contains("callback")) {
+                        Log.i("COOKBOOK_AF_DIAG", "Found CameraEx Method: " + m.getName());
                     }
+                }
+                
+                // Let's also check the hidden nested classes inside CameraEx
+                Class<?>[] classes = mCameraEx.getClass().getDeclaredClasses();
+                for (Class<?> c : classes) {
+                    Log.i("COOKBOOK_AF_DIAG", "Found Nested Class: " + c.getName());
                 }
             }
         } catch (Throwable t) {
-            Log.e("COOKBOOK_AF_DIAG", "Test 4 Failed: " + t.getMessage());
+            Log.e("COOKBOOK_AF_DIAG", "Hunting failed: " + t.getMessage());
         }
-
-        Log.i("COOKBOOK_AF_DIAG", "--- END AF DIAGNOSTICS ---");
+        Log.i("COOKBOOK_AF_DIAG", "--- END HUNT ---");
     }
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
@@ -482,8 +431,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvBottomBar.setVisibility(View.GONE);
             }
             
-            // FIRE THE DIAGNOSTIC PROBE!
-            runAfDiagnostics();
+            // FIRE THE PROBE!
+            huntForAfListeners();
             
             return super.onKeyDown(keyCode, event);
         }
