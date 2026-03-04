@@ -14,6 +14,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.FileObserver;
 import android.text.Html;
 import android.util.Pair;
 import android.view.Gravity;
@@ -62,6 +63,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
+    private SonyFileObserver mFileObserver;
+    private String sonyDCIMPath = "";
+    
+    private boolean isPolling = false;
+    private long lastNewestFileTime = 0;
     
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
@@ -89,6 +95,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public enum DialMode { rtl, shutter, aperture, iso, exposure, review }
     private DialMode mDialMode = DialMode.rtl;
 
+    private class SonyFileObserver extends FileObserver {
+        public SonyFileObserver(String path) { super(path, FileObserver.CLOSE_WRITE); }
+        @Override public void onEvent(int event, final String path) {
+            if (path == null || isProcessing || !isReady) return;
+            if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
+                final String fullPath = sonyDCIMPath + "/" + path;
+                runOnUiThread(new Runnable() { @Override public void run() { new ProcessTask().execute(fullPath); }});
+            }
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -103,6 +120,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for(int i=0; i<10; i++) profiles[i] = new RTLProfile();
         loadPreferences();
         buildUI(rootLayout);
+
+        String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
+        for (String r : possibleRoots) {
+            File f = new File(r + "/DCIM/100MSDCF");
+            if (f.exists()) { sonyDCIMPath = f.getAbsolutePath(); break; }
+        }
+        if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
         triggerLutPreload();
     }
 
@@ -368,44 +392,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-
-        // ---------------------------------------------------------
-        // SHUTTER INTERCEPT & IMMERSIVE MODE (RAM-Level Logic)
-        // ---------------------------------------------------------
-        if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
-            // Half-Press: Hide UI and trigger standard AutoFocus
+        
+        // -------------------------------------------------------------
+        // IMMERSIVE MODE (HALF-PRESS): Hides UI, lets hardware focus
+        // -------------------------------------------------------------
+        if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            if (mCamera != null) {
-                try { mCamera.autoFocus(null); } catch (Exception e) {}
-            }
-            return true;
+            // DO NOT return true. We must pass this to the hardware!
+            return super.onKeyDown(keyCode, event);
         }
 
-        if (sc == ScalarInput.ISV_KEY_S1_2 && event.getRepeatCount() == 0) {
-            // Full-Press: Trigger RAM Capture
-            if (!isProcessing && !isPlaybackMode && !isMenuOpen) {
-                isProcessing = true;
-                tvTopStatus.setVisibility(View.VISIBLE);
-                tvTopStatus.setText("PROCESSING...");
-                tvTopStatus.setTextColor(Color.YELLOW);
-                try {
-                    mCamera.takePicture(null, null, new Camera.PictureCallback() {
-                        @Override
-                        public void onPictureTaken(byte[] data, Camera camera) {
-                            new RamProcessTask().execute(data);
-                            camera.startPreview(); // Instantly un-freeze the viewfinder
-                        }
-                    });
-                } catch (Exception e) {
-                    isProcessing = false;
-                }
-            }
-            return true;
+        // FULL-PRESS: Let hardware take the photo via startDirectShutter
+        if (sc == ScalarInput.ISV_KEY_S1_2) {
+            return super.onKeyDown(keyCode, event);
         }
-        
+
         if (sc == ScalarInput.ISV_KEY_DELETE) { 
             finish(); 
             return true; 
@@ -472,10 +476,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
-            if (mCamera != null) {
-                try { mCamera.cancelAutoFocus(); } catch (Exception e) {}
-            }
-            return true;
+            return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
     }
@@ -615,6 +616,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    private void startAutoProcessPolling() {
+        isPolling = true;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                while (isPolling) {
+                    try {
+                        Thread.sleep(150); 
+                        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
+                        File sonyDir = new File(dcim, "100MSDCF");
+                        if (sonyDir.exists()) {
+                            File[] files = sonyDir.listFiles();
+                            if (files != null && files.length > 0) {
+                                File newest = null; long maxModified = 0;
+                                for (File f : files) {
+                                    if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("PRCS") && !f.getName().startsWith("GRADED")) {
+                                        if (f.lastModified() > maxModified) { maxModified = f.lastModified(); newest = f; }
+                                    }
+                                }
+                                if (newest != null) {
+                                    if (lastNewestFileTime == 0) { lastNewestFileTime = maxModified; } 
+                                    else if (maxModified > lastNewestFileTime) {
+                                        lastNewestFileTime = maxModified;
+                                        if (!isProcessing && (isReady || profiles[currentSlot].lutIndex == 0)) {
+                                            final String path = newest.getAbsolutePath();
+                                            runOnUiThread(new Runnable() { @Override public void run() { if (!isProcessing) new ProcessTask().execute(path); } });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {}
+                }
+            }
+        }).start();
+    }
+
     private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
         @Override protected void onPreExecute() { isReady = false; updateMainHUD(); }
         @Override protected Boolean doInBackground(Integer... params) {
@@ -623,58 +660,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(Boolean success) { if (isCancelled()) return; isReady = true; updateMainHUD(); }
     }
 
-    // ---------------------------------------------------------
-    // RAM-LEVEL PROCESS TASK: Bypasses the FileObserver entirely
-    // ---------------------------------------------------------
-    private class RamProcessTask extends AsyncTask<byte[], Void, String> {
-        @Override protected String doInBackground(byte[]... params) {
-            byte[] jpegData = params[0];
+    private class ProcessTask extends AsyncTask<String, Void, String> {
+        @Override protected void onPreExecute() { 
+            isProcessing = true; tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW);
+        }
+        @Override protected String doInBackground(String... params) {
             try {
-                // 1. Immediately save the raw RAM array to DCIM as the "Original" backup
-                File dcimDir = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
-                if (!dcimDir.exists()) dcimDir.mkdirs();
-                
-                // Construct a unique filename based on time
-                String filename = "DSC" + (System.currentTimeMillis() % 100000) + ".JPG";
-                File origFile = new File(dcimDir, filename);
-                
-                FileOutputStream fos = new FileOutputStream(origFile);
-                fos.write(jpegData);
-                fos.close();
-                
-                // 2. Pass that exact path to the C++ Engine to be graded instantly
+                File original = new File(params[0]);
+                if (!original.exists()) return "ERR";
+                long lastSize = -1; int timeout = 0;
+                while (timeout < 100) {
+                    long currentSize = original.length();
+                    if (currentSize > 0 && currentSize == lastSize) break;
+                    lastSize = currentSize; Thread.sleep(50); timeout++;
+                }
+
                 int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);
                 File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
                 if (!outDir.exists()) outDir.mkdirs();
-                File outFile = new File(outDir, origFile.getName());
+                File outFile = new File(outDir, original.getName());
 
                 RTLProfile p = profiles[currentSlot];
-                if (mEngine.applyLutToJpeg(origFile.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
-                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(origFile)));
                     return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
                 }
-            } catch (Throwable t) {}
-            return "FAILED";
+                return "FAILED";
+            } catch (Throwable t) { return "ERR"; }
         }
         @Override protected void onPostExecute(String result) {
-            isProcessing = false; 
-            tvTopStatus.setTextColor(Color.WHITE); 
-            updateMainHUD(); 
+            isProcessing = false; tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); 
         }
     }
 
     private void openCamera() {
         if (mCameraEx == null && hasSurface) {
             try { 
-                mCameraEx = CameraEx.open(0, null); 
-                mCamera = mCameraEx.getNormalCamera();
-                
-                // WE COMPLETELY REMOVED mCameraEx.startDirectShutter();
-                // We now handle shutter captures manually in Java!
-                
-                mCamera.setPreviewDisplay(mSurfaceView.getHolder()); 
-                mCamera.startPreview(); 
+                mCameraEx = CameraEx.open(0, null); mCamera = mCameraEx.getNormalCamera();
+                mCameraEx.startDirectShutter();
+                CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
+                mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
+                mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
                 updateMainHUD();
             } catch (Exception e) {} 
         }
@@ -691,11 +717,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         super.onResume(); 
         openCamera();
         if (mCamera != null) updateMainHUD(); 
+        startAutoProcessPolling(); 
     }
     
     @Override protected void onPause() { 
         super.onPause(); 
         closeCamera(); 
+        isPolling = false; 
         savePreferences(); 
     }
     
