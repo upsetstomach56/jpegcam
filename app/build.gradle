@@ -10,6 +10,13 @@ android {
         targetSdkVersion 25
         versionCode 1
         versionName "2.0"
+        
+        // RESTORED: This tells the compiler how to handle your C++ code
+        externalNativeBuild {
+            cmake {
+                cppFlags ""
+            }
+        }
     }
     
     buildTypes {
@@ -18,14 +25,14 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-
-    // Ensures your C++ NDK library is packaged into the APK regardless of where the runner builds it
-    sourceSets {
-        main {
-            jniLibs.srcDirs = ['src/main/jniLibs', 'src/main/libs', 'libs']
+    
+    // RESTORED: This points the compiler to your actual C++ engine files
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
         }
     }
-    
+
     applicationVariants.all { variant ->
         variant.outputs.all {
             outputFileName = "Sony-JPGCookbook-NDK-v2.0-NDK.apk"
