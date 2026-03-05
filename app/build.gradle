@@ -5,7 +5,7 @@ android {
     buildToolsVersion "28.0.3"
 
     defaultConfig {
-        applicationId "com.jpgcookbook.sony"
+        applicationId "com.github.ma1co.pmcademo.app"
         minSdkVersion 10
         targetSdkVersion 25
         versionCode 1
