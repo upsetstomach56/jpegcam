@@ -49,7 +49,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
     
-    private TextView tvBottomBar, tvTopStatus, tvBattery, tvMode, tvFocus, tvReview; 
+    private TextView tvBottomBar, tvTopStatus, tvBattery, tvReview; 
+    private ImageView ivMode, ivDrive; 
     
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
@@ -193,7 +194,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(40, 22));
         rightBar.addView(batteryArea);
 
-        tvReview = createSideIcon("REVIEW");
+        tvReview = createSideTextIcon("REVIEW");
         tvReview.setVisibility(View.GONE);
         LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2);
         rvParams.setMargins(0, 20, 0, 0);
@@ -204,12 +205,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         rightParams.setMargins(0, 20, 20, 0);
         mainUIContainer.addView(rightBar, rightParams);
 
+        // Phase 2: Live Hardware Icons
         LinearLayout leftBar = new LinearLayout(this);
         leftBar.setOrientation(LinearLayout.VERTICAL);
-        tvMode = createSideIcon("M");
-        leftBar.addView(tvMode);
-        tvFocus = createSideIcon("AF-S");
-        leftBar.addView(tvFocus);
+        
+        ivMode = createSideIconImage(SonyDrawables.s_16_dd_parts_osd_icon_mode_m);
+        leftBar.addView(ivMode);
+        
+        ivDrive = createSideIconImage(SonyDrawables.p_drivemode_n_001);
+        leftBar.addView(ivDrive);
+        
         FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
         leftParams.setMargins(20, 20, 0, 0);
         mainUIContainer.addView(leftBar, leftParams);
@@ -276,7 +281,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    private TextView createSideIcon(String text) {
+    private ImageView createSideIconImage(int resId) {
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(resId);
+        iv.setBackgroundColor(Color.argb(140, 40, 40, 40));
+        iv.setPadding(10, 10, 10, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(0, 0, 0, 10);
+        iv.setLayoutParams(lp);
+        return iv;
+    }
+
+    private TextView createSideTextIcon(String text) {
         TextView tv = new TextView(this);
         tv.setText(text); tv.setTextColor(Color.WHITE); tv.setTextSize(16);
         tv.setTypeface(Typeface.MONOSPACE); tv.setPadding(12, 6, 12, 6);
@@ -465,7 +481,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE); tvBottomBar.setVisibility(View.GONE);
-                tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocus.setVisibility(View.GONE);
+                tvBattery.setVisibility(View.GONE); ivMode.setVisibility(View.GONE); ivDrive.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
             }
             if (afOverlay != null) { afOverlay.startFocus(mCamera); }
             return super.onKeyDown(keyCode, event);
@@ -524,7 +540,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (event.getScanCode() == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE); tvBottomBar.setVisibility(View.VISIBLE);
-                tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocus.setVisibility(View.VISIBLE);
+                tvBattery.setVisibility(View.VISIBLE); ivMode.setVisibility(View.VISIBLE); ivDrive.setVisibility(View.VISIBLE);
+                if (mDialMode == DIAL_MODE_REVIEW) tvReview.setVisibility(View.VISIBLE);
             }
             if (afOverlay != null) { afOverlay.stopFocus(mCamera); }
         }
@@ -616,6 +633,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters params = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(params);
             
+            // Live Hardware Icons Update
+            String sceneMode = params.getSceneMode();
+            if (sceneMode != null) {
+                if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_MANUAL_EXPOSURE)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_m);
+                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_APERTURE_PRIORITY)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_a);
+                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_SHUTTER_PRIORITY)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_s);
+                else ivMode.setImageResource(SonyDrawables.p_dialogwarning);
+            }
+
+            String driveMode = pm.getDriveMode();
+            if (driveMode != null) {
+                if (driveMode.equals(CameraEx.ParametersModifier.DRIVE_MODE_SINGLE)) ivDrive.setImageResource(SonyDrawables.p_drivemode_n_001);
+                else if (driveMode.equals(CameraEx.ParametersModifier.DRIVE_MODE_BURST)) {
+                    if (CameraEx.ParametersModifier.BURST_DRIVE_SPEED_LOW.equals(pm.getBurstDriveSpeed())) ivDrive.setImageResource(SonyDrawables.p_drivemode_n_003);
+                    else ivDrive.setImageResource(SonyDrawables.p_drivemode_n_002);
+                } else {
+                    ivDrive.setImageResource(SonyDrawables.p_drivemode_n_001);
+                }
+            }
+
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
             String ss = speed.first == 1 && speed.second != 1 ? speed.first + "/" + speed.second : speed.first + "\"";
             String ap = String.format("f%.1f", pm.getAperture() / 100.0f);
