@@ -93,6 +93,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int mDialMode = DIAL_MODE_RTL;
 
     private float lastKnownFocusRatio = 0.5f;
+    private float lastKnownAperture = 2.8f;
 
     private int lastBatteryLevel = 100;
     private BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
@@ -107,6 +108,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     };
 
+    // Lag-free polling logic
     private Handler uiHandler = new Handler();
     private Runnable liveUpdater = new Runnable() {
         @Override
@@ -114,7 +116,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
                 updateMainHUD();
             }
-            uiHandler.postDelayed(this, 150); 
+            uiHandler.postDelayed(this, 500); 
         }
     };
 
@@ -678,7 +680,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 List<String> modes = p.getSupportedSceneModes();
                 if (modes != null) { 
                     List<String> validPasm = new ArrayList<String>();
-                    String[] desired = {"manual", "aperture-priority", "shutter-priority", "program-auto", "auto", "intelligent-active"};
+                    // Added manual-exposure string to fix the missing M mode!
+                    String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto", "auto", "intelligent-active"};
                     for(String m : desired) { if (modes.contains(m)) validPasm.add(m); }
                     
                     if(!validPasm.isEmpty()) {
@@ -698,6 +701,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             updateMainHUD();
         } catch (Exception e) {}
+
+        // Pause heavy polling for 1 second while turning the dial to cure lag
+        uiHandler.removeCallbacks(liveUpdater);
+        uiHandler.postDelayed(liveUpdater, 1000); 
     }
 
     private void updateMainHUD() {
@@ -709,7 +716,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         if (!isProcessing) {
             tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING..."));
-            tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.GREEN : Color.WHITE);
+            // Changed Top Status active color to Sony Orange
+            tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.rgb(230, 50, 15) : Color.WHITE);
         }
         
         tvReview.setVisibility(mDialMode == DIAL_MODE_REVIEW ? View.VISIBLE : View.GONE);
@@ -720,7 +728,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters params = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(params);
             
-            tvMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
+            // Changed left HUD highlights to Sony Orange
+            tvMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
             String sceneMode = params.getSceneMode();
             if (sceneMode != null) {
                 if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_MANUAL_EXPOSURE)) tvMode.setText("M");
@@ -731,7 +740,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else tvMode.setText("SCN"); 
             }
 
-            tvFocusMode.setBackgroundColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
+            tvFocusMode.setBackgroundColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
             String fMode = params.getFocusMode();
             if (fMode != null) {
                 if (fMode.equals("manual")) tvFocusMode.setText("MF");
@@ -740,20 +749,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else tvFocusMode.setText(fMode.toUpperCase());
             }
 
+            lastKnownAperture = pm.getAperture() / 100.0f;
             if ("manual".equals(fMode)) {
-                float fAperture = pm.getAperture() / 100.0f;
-                if (focusMeter != null) focusMeter.update(lastKnownFocusRatio, fAperture, true);
+                if (focusMeter != null) focusMeter.update(lastKnownFocusRatio, lastKnownAperture, true);
             } else {
                 if (focusMeter != null) focusMeter.update(0, 0, false);
             }
 
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
             String ss = speed.first == 1 && speed.second != 1 ? speed.first + "/" + speed.second : speed.first + "\"";
-            String ap = String.format("f%.1f", pm.getAperture() / 100.0f);
+            String ap = String.format("f%.1f", lastKnownAperture);
             String iso = pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity();
             String exp = String.format("%+.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
 
-            String cAct = "<font color='#00FF00'>"; String cDef = "<font color='#FFFFFF'>"; String cEnd = "</font>";
+            // Changed Shutter/Aperture highlight to Sony Orange Hex
+            String cAct = "<font color='#E6320F'>"; String cDef = "<font color='#FFFFFF'>"; String cEnd = "</font>";
             String space = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"; 
 
             StringBuilder sb = new StringBuilder();
@@ -806,7 +816,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
-                // Hardware Focus Listener via Reflection
+                // Asynchronous hardware focus listener fixes lag and tracks needle perfectly
                 try {
                     Class<?> listenerClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusDriveListener");
                     Object proxy = java.lang.reflect.Proxy.newProxyInstance(
@@ -822,6 +832,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                         int max = pos.getClass().getField("maxPosition").getInt(pos);
                                         if (max > 0) {
                                             lastKnownFocusRatio = (float) cur / max;
+                                            runOnUiThread(new Runnable() {
+                                                @Override public void run() {
+                                                    if (focusMeter != null && mDialMode == DIAL_MODE_FOCUS) {
+                                                        focusMeter.update(lastKnownFocusRatio, lastKnownAperture, true);
+                                                    }
+                                                }
+                                            });
                                         }
                                     }
                                 }
@@ -937,10 +954,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             float distanceMultiplier = 1.0f + (ratio * 2.0f); 
             float dofRadius = baseDof * distanceMultiplier;
 
-            float dofLeft = Math.max(pad, needleX - dofRadius);
-            float dofRight = Math.min(w - pad, needleX + dofRadius);
-
-            canvas.drawLine(dofLeft, y, dofRight, y, dofPaint);
+            // Clip the drawing bounds to avoid shifting the visual center
+            canvas.save();
+            canvas.clipRect(pad, 0, w - pad, h);
+            canvas.drawLine(needleX - dofRadius, y, needleX + dofRadius, y, dofPaint);
+            canvas.restore();
+            
             canvas.drawLine(needleX, y - 15, needleX, y + 15, needlePaint);
         }
     }
@@ -986,7 +1005,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             switch (fallbackState) {
                 case STATE_IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break;
                 case STATE_SEARCHING: paint.setColor(Color.YELLOW); break;
-                case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
+                // Updated Focus Lock to match Sony Orange!
+                case STATE_LOCKED:    paint.setColor(Color.rgb(230, 50, 15)); break;
                 case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
             int cx = getWidth() / 2, cy = getHeight() / 2, size = 60, bracket = 15;
