@@ -70,6 +70,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private String sonyDCIMPath = "";
     
     private ProReticleView afOverlay;
+    private AdvancedFocusMeterView focusMeter; 
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
@@ -104,16 +105,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     };
 
-    // Live Exposure Polling Handler
+    // Phase 3: High-Speed UI Polling (150ms)
     private Handler uiHandler = new Handler();
     private Runnable liveUpdater = new Runnable() {
         @Override
         public void run() {
-            // Only poll the exposure if we are actively framing a shot (not in menu, not processing)
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
                 updateMainHUD();
             }
-            uiHandler.postDelayed(this, 500); // 2 updates per second
+            uiHandler.postDelayed(this, 150); 
         }
     };
 
@@ -244,6 +244,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
         leftParams.setMargins(20, 20, 0, 0);
         mainUIContainer.addView(leftBar, leftParams);
+
+        // Phase 3: Cinema Focus Meter
+        focusMeter = new AdvancedFocusMeterView(this);
+        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 80, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        fmParams.setMargins(0, 0, 0, 100); // Sit right above bottom exposure text
+        mainUIContainer.addView(focusMeter, fmParams);
 
         tvBottomBar = new TextView(this);
         tvBottomBar.setTextSize(26);
@@ -504,13 +510,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE); tvBottomBar.setVisibility(View.GONE);
                 tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocusMode.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
+                if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             }
             if (afOverlay != null && mCamera != null) { 
                 try {
                     String fm = mCamera.getParameters().getFocusMode();
-                    if (!"manual".equals(fm)) {
-                        afOverlay.startFocus(mCamera); 
-                    }
+                    if (!"manual".equals(fm)) afOverlay.startFocus(mCamera); 
                 } catch (Exception e) {}
             }
             return super.onKeyDown(keyCode, event);
@@ -570,14 +575,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE); tvBottomBar.setVisibility(View.VISIBLE);
                 tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocusMode.setVisibility(View.VISIBLE);
+                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
                 if (mDialMode == DIAL_MODE_REVIEW) tvReview.setVisibility(View.VISIBLE);
             }
             if (afOverlay != null && mCamera != null) { 
                 try {
                     String fm = mCamera.getParameters().getFocusMode();
-                    if (!"manual".equals(fm)) {
-                        afOverlay.stopFocus(mCamera); 
-                    }
+                    if (!"manual".equals(fm)) afOverlay.stopFocus(mCamera); 
                 } catch (Exception e) {}
             }
         }
@@ -671,24 +675,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera.setParameters(p); 
             }
             else if (mDialMode == DIAL_MODE_PASM) {
-                // Brute-force cycle through the official PASM modes
                 String[] pasm = {"manual", "aperture-priority", "shutter-priority", "program-auto", "auto"};
                 int idx = 0;
                 String cur = p.getSceneMode();
-                if (cur != null) {
-                    for(int i=0; i<pasm.length; i++) {
-                        if(pasm[i].equals(cur)) { idx = i; break; }
-                    }
-                }
-                
-                // Attempt to set modes until the camera accepts one
+                if (cur != null) { for(int i=0; i<pasm.length; i++) { if(pasm[i].equals(cur)) { idx = i; break; } } }
                 for(int i=1; i<=pasm.length; i++) {
                     int next = (idx + (d > 0 ? i : -i) + pasm.length) % pasm.length;
-                    try {
-                        p.setSceneMode(pasm[next]);
-                        mCamera.setParameters(p);
-                        break; // Stop iterating if successfully applied
-                    } catch (Exception e) {}
+                    try { p.setSceneMode(pasm[next]); mCamera.setParameters(p); break; } catch (Exception e) {}
                 }
             }
             else if (mDialMode == DIAL_MODE_FOCUS) {
@@ -702,6 +695,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
     }
 
+    private float lastKnownFocusRatio = 0.5f;
+
+    private float getFocusRatio(CameraEx.ParametersModifier pm, Camera.Parameters params) {
+        // Reflection protects app from crashing if Sony API varies across camera models
+        try {
+            java.lang.reflect.Method getCur = pm.getClass().getMethod("getFocusPosition");
+            java.lang.reflect.Method getMax = pm.getClass().getMethod("getMaxFocusPosition");
+            int cur = (Integer) getCur.invoke(pm);
+            int max = (Integer) getMax.invoke(pm);
+            if (max > 0) return lastKnownFocusRatio = ((float) cur / max);
+        } catch (Exception e) {}
+        
+        try {
+            float[] dists = new float[3];
+            params.getFocusDistances(dists);
+            float optimal = dists[Camera.Parameters.FOCUS_DISTANCE_OPTIMAL_INDEX];
+            if (optimal > 0 && optimal < Float.POSITIVE_INFINITY) {
+                float ratio = (optimal - 0.1f) / 10.0f; // Map distances 0.1m to 10m
+                return lastKnownFocusRatio = Math.max(0.0f, Math.min(1.0f, ratio));
+            }
+        } catch (Exception e) {}
+        return lastKnownFocusRatio;
+    }
+
     private void updateMainHUD() {
         if(mCamera == null) return;
         RTLProfile prof = profiles[currentSlot];
@@ -709,7 +726,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         String rawName = recipeNames.get(prof.lutIndex);
         String displayName = rawName.length() > 15 ? rawName.substring(0, 12) + "..." : rawName;
         
-        // Ensure "PROCESSING..." text from other threads isn't overwritten
         if (!isProcessing) {
             tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING..."));
             tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.GREEN : Color.WHITE);
@@ -741,6 +757,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else if (fMode.equals("auto")) tvFocusMode.setText("AF-S");
                 else if (fMode.equals("continuous-picture")) tvFocusMode.setText("AF-C");
                 else tvFocusMode.setText(fMode.toUpperCase());
+            }
+
+            // High-Speed Focus Meter Update
+            if ("manual".equals(fMode)) {
+                float fAperture = pm.getAperture() / 100.0f;
+                float ratio = getFocusRatio(pm, params);
+                if (focusMeter != null) focusMeter.update(ratio, fAperture, true);
+            } else {
+                if (focusMeter != null) focusMeter.update(0, 0, false);
             }
 
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
@@ -831,19 +856,89 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (mCamera != null) updateMainHUD(); 
         registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (mScanner != null) mScanner.start(); 
-        uiHandler.post(liveUpdater); // Start polling light meter
+        uiHandler.post(liveUpdater);
     }
     
     @Override protected void onPause() { 
         super.onPause(); closeCamera(); 
         try { unregisterReceiver(batteryReceiver); } catch (Exception e) {}
         if (mScanner != null) mScanner.stop(); 
-        uiHandler.removeCallbacks(liveUpdater); // Stop polling
+        uiHandler.removeCallbacks(liveUpdater);
         savePreferences(); 
     }
     
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { updateMainHUD(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
+
+    // ==========================================
+    // PHASE 3: CINEMA STYLE FOCUS METER
+    // ==========================================
+    private class AdvancedFocusMeterView extends View {
+        private Paint trackPaint, needlePaint, dofPaint, textPaint;
+        private float ratio = 0.5f; 
+        private float aperture = 2.8f;
+        private boolean isActive = false;
+
+        public AdvancedFocusMeterView(Context context) {
+            super(context);
+            trackPaint = new Paint(); 
+            trackPaint.setColor(Color.argb(150, 200, 200, 200)); 
+            trackPaint.setStrokeWidth(4);
+            
+            dofPaint = new Paint(); 
+            dofPaint.setColor(Color.argb(180, 50, 150, 255)); // Cinema Blue
+            dofPaint.setStrokeWidth(12);
+            dofPaint.setStrokeCap(Paint.Cap.ROUND);
+            
+            needlePaint = new Paint(); 
+            needlePaint.setColor(Color.WHITE); 
+            needlePaint.setStrokeWidth(6);
+            needlePaint.setStrokeCap(Paint.Cap.ROUND);
+            
+            textPaint = new Paint(); 
+            textPaint.setColor(Color.WHITE); 
+            textPaint.setTextSize(18); 
+            textPaint.setAntiAlias(true); 
+            textPaint.setTextAlign(Paint.Align.CENTER);
+        }
+
+        public void update(float currentRatio, float fStop, boolean active) {
+            this.ratio = currentRatio;
+            this.aperture = fStop;
+            this.isActive = active;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            if (!isActive) return;
+            int w = getWidth();
+            int h = getHeight();
+            int pad = 50;
+            int trackW = w - (pad * 2);
+            int y = h / 2 + 10;
+
+            canvas.drawLine(pad, y, w - pad, y, trackPaint);
+
+            canvas.drawText("0.1m", pad, y - 20, textPaint);
+            canvas.drawText("0.5m", pad + trackW * 0.25f, y - 20, textPaint);
+            canvas.drawText("1m", pad + trackW * 0.5f, y - 20, textPaint);
+            canvas.drawText("5m", pad + trackW * 0.75f, y - 20, textPaint);
+            canvas.drawText("INF", w - pad, y - 20, textPaint);
+
+            float needleX = pad + (trackW * ratio);
+
+            // DoF Artistically Widens with High Aperture & Further Distance
+            float baseDof = (aperture / 22.0f) * (trackW * 0.15f);
+            float distanceMultiplier = 1.0f + (ratio * 2.0f); 
+            float dofRadius = baseDof * distanceMultiplier;
+
+            float dofLeft = Math.max(pad, needleX - dofRadius);
+            float dofRight = Math.min(w - pad, needleX + dofRadius);
+
+            canvas.drawLine(dofLeft, y, dofRight, y, dofPaint);
+            canvas.drawLine(needleX, y - 15, needleX, y + 15, needlePaint);
+        }
+    }
 
     private class ProReticleView extends View {
         private Paint paint;
@@ -863,29 +958,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (cam == null) return;
             try {
                 if ("manual".equals(cam.getParameters().getFocusMode())) return;
-                
                 fallbackState = STATE_SEARCHING;
                 cam.autoFocus(new Camera.AutoFocusCallback() {
-                    @Override public void onAutoFocus(boolean success, Camera camera) { 
-                        fallbackState = success ? STATE_LOCKED : STATE_FAILED; 
-                        invalidate(); 
-                    }
+                    @Override public void onAutoFocus(boolean success, Camera camera) { fallbackState = success ? STATE_LOCKED : STATE_FAILED; invalidate(); }
                 });
-                isPolling = true; 
-                invalidate();
+                isPolling = true; invalidate();
             } catch (Exception e) {}
         }
 
         public void stopFocus(Camera cam) {
-            isPolling = false; 
-            fallbackState = STATE_IDLE; 
-            invalidate();
-            
+            isPolling = false; fallbackState = STATE_IDLE; invalidate();
             if (cam != null) { 
                 try { 
-                    if (!"manual".equals(cam.getParameters().getFocusMode())) {
-                        cam.cancelAutoFocus(); 
-                    }
+                    if (!"manual".equals(cam.getParameters().getFocusMode())) cam.cancelAutoFocus(); 
                 } catch (Exception e) {} 
             }
         }
