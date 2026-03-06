@@ -226,13 +226,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvBattery.setTextColor(Color.WHITE);
         tvBattery.setTextSize(18);
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
-        tvBattery.setPadding(0, 0, 5, 0);
+        tvBattery.setPadding(0, 0, 10, 0);
         batteryArea.addView(tvBattery);
 
         View batteryIcon = new View(this) {
             @Override protected void onDraw(Canvas canvas) { drawSonyBattery(canvas, this); }
         };
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); // Added width for safety
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22));
         rightBar.addView(batteryArea);
 
         tvReview = createSideTextIcon("▶");
@@ -247,7 +247,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvReview.setLayoutParams(rvParams);
         rightBar.addView(tvReview);
 
-        // Increased right margin to prevent battery cut-off
         FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         rightParams.setMargins(0, 20, 30, 0); 
         mainUIContainer.addView(rightBar, rightParams);
@@ -306,7 +305,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
-        // Reduced padding to allow more text space
         menuContainer.setPadding(20, 20, 20, 20); 
         
         menuHeaderLayout = new LinearLayout(this);
@@ -315,7 +313,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuHeaderLayout.setPadding(10, 0, 10, 15);
 
         tvMenuTitle = new TextView(this);
-        tvMenuTitle.setTextSize(22); // Reduced from 26
+        tvMenuTitle.setTextSize(22); 
         tvMenuTitle.setTypeface(Typeface.DEFAULT_BOLD);
         tvMenuTitle.setTextColor(Color.WHITE);
         menuHeaderLayout.addView(tvMenuTitle, new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -326,7 +324,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for(int i=0; i<3; i++) {
             tvPageNumbers[i] = new TextView(this);
             tvPageNumbers[i].setText(String.valueOf(i+1));
-            tvPageNumbers[i].setTextSize(20); // Reduced from 22
+            tvPageNumbers[i].setTextSize(20); 
             tvPageNumbers[i].setTypeface(Typeface.DEFAULT_BOLD);
             tvPageNumbers[i].setPadding(15, 0, 15, 0);
             pagesLayout.addView(tvPageNumbers[i]);
@@ -349,11 +347,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
             
             menuLabels[i] = new TextView(this); 
-            menuLabels[i].setTextSize(18); // Reduced to prevent cutoff
+            menuLabels[i].setTextSize(18); 
             menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             
             menuValues[i] = new TextView(this); 
-            menuValues[i].setTextSize(18); // Reduced to prevent cutoff
+            menuValues[i].setTextSize(18); 
             menuValues[i].setGravity(Gravity.RIGHT);
             
             menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -390,6 +388,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
+    // Helper functions to format the Grid visually exactly like native Sony menus
+    private String formatAB(int val) {
+        if (val == 0) return "0";
+        return val > 0 ? "A" + val : "B" + Math.abs(val);
+    }
+    
+    private String formatGM(int val) {
+        if (val == 0) return "0";
+        return val > 0 ? "G" + val : "M" + Math.abs(val);
+    }
+
     private TextView createBottomText() {
         TextView tv = new TextView(this);
         tv.setTextSize(26);
@@ -418,7 +427,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         Paint p = new Paint(); p.setAntiAlias(true); p.setStrokeWidth(2);
         p.setColor(Color.WHITE); p.setStyle(Paint.Style.STROKE);
         
-        // Prevent drawing outside the bounding box
         canvas.drawRect(2, 2, v.getWidth() - 8, v.getHeight() - 2, p);
         p.setStyle(Paint.Style.FILL);
         canvas.drawRect(v.getWidth() - 8, v.getHeight()/2 - 4, v.getWidth() - 2, v.getHeight()/2 + 4, p);
@@ -537,6 +545,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
             editor.putString("slot_" + i + "_wb", profiles[i].whiteBalance);
             editor.putInt("slot_" + i + "_wbShift", profiles[i].wbShift);
+            editor.putInt("slot_" + i + "_wbShiftGM", profiles[i].wbShiftGM);
             editor.putString("slot_" + i + "_dro", profiles[i].dro);
         }
         editor.commit(); 
@@ -556,7 +565,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                   .append(profiles[i].vignette).append(",")
                   .append(profiles[i].whiteBalance).append(",")
                   .append(profiles[i].wbShift).append(",")
-                  .append(profiles[i].dro).append("\n");
+                  .append(profiles[i].dro).append(",")
+                  .append(profiles[i].wbShiftGM).append("\n"); // Appended GM safely to the end
             }
             fos.write(sb.toString().getBytes()); fos.flush(); fos.getFD().sync(); fos.close();
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
@@ -591,6 +601,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                 profiles[idx].wbShift = Integer.parseInt(parts[8]);
                                 profiles[idx].dro = parts[9];
                             }
+                            if (parts.length >= 11) {
+                                profiles[idx].wbShiftGM = Integer.parseInt(parts[10]);
+                            }
                         }
                     }
                 }
@@ -612,6 +625,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0)); profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
             profiles[i].whiteBalance = prefs.getString("slot_" + i + "_wb", "AUTO");
             profiles[i].wbShift = prefs.getInt("slot_" + i + "_wbShift", 0);
+            profiles[i].wbShiftGM = prefs.getInt("slot_" + i + "_wbShiftGM", 0);
             profiles[i].dro = prefs.getString("slot_" + i + "_dro", "OFF");
         }
     }
@@ -636,6 +650,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
             p.set("sony-dro", prof.dro.toLowerCase());
             p.set("sony-wb-shift-ab", prof.wbShift);
+            p.set("sony-wb-shift-gm", prof.wbShiftGM);
             
             mCamera.setParameters(p);
         } catch (Exception e) {}
@@ -763,7 +778,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         p.whiteBalance = wbLabels[(wbi + dir + wbLabels.length) % wbLabels.length];
                         applyProfileSettings(); break;
                     case 8: p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); applyProfileSettings(); break;
-                    case 9:
+                    case 9: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); applyProfileSettings(); break;
+                    case 10:
                         int droi = java.util.Arrays.asList(droLabels).indexOf(p.dro);
                         if(droi == -1) droi = 0;
                         p.dro = droLabels[(droi + dir + droLabels.length) % droLabels.length];
@@ -802,19 +818,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             tvPageNumbers[i].setPaintFlags(isCurPage && isHeaderSelected ? Paint.UNDERLINE_TEXT_FLAG : 0);
         }
 
-        for(int i=0; i<10; i++) menuRows[i].setVisibility(View.GONE);
+        for(int i=0; i<11; i++) menuRows[i].setVisibility(View.GONE);
 
         RTLProfile p = profiles[currentSlot];
 
         if (currentPage == 1) { 
-            currentItemCount = 10;
-            String[] rLabels = {"RTL Slot", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette", "White Balance", "WB Shift", "DRO"};
+            currentItemCount = 11;
+            String[] rLabels = {"RTL Slot", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette", "White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO"};
             String[] rValues = {
                 String.valueOf(currentSlot + 1), recipeNames.get(p.lutIndex), p.opacity + "%", 
                 intensityLabels[p.grain], grainSizeLabels[p.grainSize], intensityLabels[p.rollOff], 
-                intensityLabels[p.vignette], p.whiteBalance, (p.wbShift > 0 ? "+" : "") + p.wbShift, p.dro
+                intensityLabels[p.vignette], p.whiteBalance, formatAB(p.wbShift), formatGM(p.wbShiftGM), p.dro
             };
-            for(int i=0; i<10; i++) {
+            for(int i=0; i<11; i++) {
                 menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE);
             }
         } 
@@ -1138,7 +1154,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             int w = getWidth();
             int h = getHeight();
             
-            // Calculate 3:2 Photo Bounding Box
             int imgW = w;
             int imgH = (int) (w * (2.0f / 3.0f));
             if (imgH > h) { imgH = h; imgW = (int) (h * (3.0f / 2.0f)); }
@@ -1168,7 +1183,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             int w = getWidth();
             int h = getHeight();
             
-            // Calculate 3:2 Photo Bounding Box
             int imgW = w;
             int imgH = (int) (w * (2.0f / 3.0f));
             if (imgH > h) { imgH = h; imgW = (int) (h * (3.0f / 2.0f)); }
@@ -1177,7 +1191,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             int topBarBottom = (h - targetHeight) / 2;
             int bottomBarTop = (h + targetHeight) / 2;
 
-            // Black out everything above and below the true anamorphic frame
             canvas.drawRect(0, 0, w, topBarBottom, mattePaint);
             canvas.drawRect(0, bottomBarTop, w, h, mattePaint);
         }
