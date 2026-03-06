@@ -7,9 +7,13 @@ public class RTLProfile {
     public int grainSize = 1;
     public int rollOff = 0;
     public int vignette = 0;
-    
     public String whiteBalance = "AUTO";
-    public int wbShift = 0;      // This controls Amber-Blue (A-B)
-    public int wbShiftGM = 0;    // ADD THIS LINE: Controls Green-Magenta (G-M)
+    public int wbShift = 0;
+    public int wbShiftGM = 0;
     public String dro = "OFF";
+    
+    // The three missing fields causing the crash!
+    public int contrast = 0;
+    public int saturation = 0;
+    public int sharpness = 0;
 }
