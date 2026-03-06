@@ -106,10 +106,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     
-    // AF Lock Memory
     private String savedFocusMode = null;
 
-    // AlphaOS State Tracking
     private String connStatusHotspot = "Press ENTER to Start";
     private String connStatusWifi = "Press ENTER to Start";
     
@@ -153,7 +151,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private Handler uiHandler = new Handler();
     
-    // Phase 9: UI Thread Debouncer
     private Runnable applySettingsRunnable = new Runnable() {
         @Override
         public void run() {
@@ -165,6 +162,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override
         public void run() {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
+                
+                // Self-Healing UI Trap: Checks physical hardware switch to see if shutter is actively held down
+                if (ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0) {
+                    if (afOverlay != null && afOverlay.isPolling()) {
+                        afOverlay.stopFocus(mCamera);
+                    }
+                    if (tvTopStatus.getVisibility() != View.VISIBLE) {
+                        tvTopStatus.setVisibility(View.VISIBLE);
+                        llBottomBar.setVisibility(View.VISIBLE);
+                        tvBattery.setVisibility(View.VISIBLE);
+                        tvMode.setVisibility(View.VISIBLE);
+                        tvFocusMode.setVisibility(View.VISIBLE);
+                        if (focusMeter != null && prefShowFocusMeter) focusMeter.setVisibility(View.VISIBLE);
+                        tvReview.setVisibility(View.VISIBLE);
+                    }
+                }
+                
                 updateMainHUD();
             }
             uiHandler.postDelayed(this, 500); 
@@ -182,7 +196,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(-1, -1));
         setContentView(rootLayout); 
 
-        // Init AlphaOS Network Managers
         alphaWifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         alphaConnManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         alphaDirectManager = (DirectManager) getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
@@ -689,29 +702,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
             p.set("sony-dro", prof.dro.toLowerCase());
             
-            // Phase 8.2: Brute forcing Sony's undocumented AWB Shift parameters
-            p.set("sony-wb-shift-ab", prof.wbShift);
-            p.set("sony-wb-shift-gm", prof.wbShiftGM);
-            p.set("sony-awb-shift-ab", prof.wbShift);
-            p.set("sony-awb-shift-gm", prof.wbShiftGM);
+            // Phase 9: TRUE SONY WB SHIFT INJECTION
+            p.set("light-balance-for-white-balance", prof.wbShift); // A-B Shift
+            p.set("color-compensation-for-white-balance", prof.wbShiftGM); // G-M Shift
             
             mCamera.setParameters(p);
         } catch (Exception e) {}
-    }
-
-    // Phase 9: Dump undocumented parameters to SD Card to reverse engineer WB Shift
-    private void dumpCameraParameters() {
-        if (mCamera == null) return;
-        try {
-            File dumpFile = new File(Environment.getExternalStorageDirectory(), "GRADED/PARAMS.TXT");
-            if (!dumpFile.exists()) {
-                dumpFile.getParentFile().mkdirs();
-                FileWriter fw = new FileWriter(dumpFile);
-                fw.write(mCamera.getParameters().flatten().replace(";", "\n"));
-                fw.close();
-                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(dumpFile)));
-            }
-        } catch(Exception e){}
     }
 
     @Override 
@@ -743,7 +739,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                // Phase 9: Lock focus to manual while menu is open so it stops hunting
                 if (mCamera != null) {
                     try {
                         Camera.Parameters p = mCamera.getParameters();
@@ -759,7 +754,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 currentPage = 1; menuSelection = 0; 
                 menuContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
             } else {
-                // Restore Focus Mode
                 if (mCamera != null && savedFocusMode != null) {
                     try {
                         Camera.Parameters p = mCamera.getParameters();
@@ -785,16 +779,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
             } else {
                 if (currentPage == 3 && menuSelection >= 0) {
-                    // Phase 9: Network switching delays
                     if (menuSelection == 0) {
-                        updateConnectionStatus("HOTSPOT", "Switching modes...");
-                        stopAlphaOSNetworking();
-                        uiHandler.postDelayed(new Runnable() { public void run() { startAlphaOSHotspot(); } }, 1500);
+                        if (isHomeWifiRunning) {
+                            updateConnectionStatus("HOTSPOT", "Switching modes...");
+                            stopAlphaOSNetworking();
+                            uiHandler.postDelayed(new Runnable() { public void run() { startAlphaOSHotspot(); } }, 3000);
+                        } else {
+                            startAlphaOSHotspot();
+                        }
                     }
                     else if (menuSelection == 1) {
-                        updateConnectionStatus("WIFI", "Switching modes...");
-                        stopAlphaOSNetworking();
-                        uiHandler.postDelayed(new Runnable() { public void run() { startAlphaOSHomeWifi(); } }, 1500);
+                        if (isHotspotRunning) {
+                            updateConnectionStatus("WIFI", "Switching modes...");
+                            stopAlphaOSNetworking();
+                            uiHandler.postDelayed(new Runnable() { public void run() { startAlphaOSHomeWifi(); } }, 3000);
+                        } else {
+                            startAlphaOSHomeWifi();
+                        }
                     }
                     else if (menuSelection == 2) {
                         stopAlphaOSNetworking();
@@ -836,6 +837,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override 
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (event.getScanCode() == ScalarInput.ISV_KEY_S1_1) {
+            if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
+                tvTopStatus.setVisibility(View.VISIBLE); llBottomBar.setVisibility(View.VISIBLE);
+                tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocusMode.setVisibility(View.VISIBLE);
+                if (focusMeter != null && prefShowFocusMeter) focusMeter.setVisibility(View.VISIBLE);
+                tvReview.setVisibility(View.VISIBLE);
+            }
+            if (afOverlay != null && mCamera != null) { 
+                try {
+                    String fm = mCamera.getParameters().getFocusMode();
+                    if (!"manual".equals(fm)) afOverlay.stopFocus(mCamera); 
+                } catch (Exception e) {}
+            }
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     private void handleMenuChange(int dir) {
@@ -884,8 +904,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
         
         renderMenu();
-        
-        // Phase 9: UI Thread Debouncer (Fixes menu lag)
         uiHandler.removeCallbacks(applySettingsRunnable);
         uiHandler.postDelayed(applySettingsRunnable, 400);
     }
@@ -938,7 +956,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
         }
 
-        // Phase 9: Text Visibility Fix
         for (int i = 0; i < currentItemCount; i++) {
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
@@ -1194,8 +1211,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 applyProfileSettings();
                 updateMainHUD();
                 
-                // Trigger parameter dump for reverse engineering!
-                dumpCameraParameters();
             } catch (Exception e) {} 
         }
     }
@@ -1382,6 +1397,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             super(context);
             paint = new Paint(); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(6); paint.setAntiAlias(true);
         }
+        
+        public boolean isPolling() { return isPolling; }
 
         public void startFocus(Camera cam) {
             if (cam == null) return;
@@ -1414,10 +1431,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
             int cx = getWidth() / 2, cy = getHeight() / 2, size = 60, bracket = 15;
-            canvas.drawLine(cx-size, cy-size, cx-size+bracket, cy-size, paint); canvas.drawLine(cx-size, cy-size, cx-size, cy-size+bracket, paint);
-            canvas.drawLine(cx+size, cy-size, cx+size-bracket, cy-size, paint); canvas.drawLine(cx+size, cy-size, cx+size, cy-size+bracket, paint);
-            canvas.drawLine(cx-size, cy+size, cx-size+bracket, cy+size, paint); canvas.drawLine(cx-size, cy+size, cx-size, cy-size-bracket, paint);
-            canvas.drawLine(cx+size, cy+size, cx+size-bracket, cy+size, paint); canvas.drawLine(cx+size, cy+size, cx+size, cy-size-bracket, paint);
+            
+            // Top Left
+            canvas.drawLine(cx-size, cy-size, cx-size+bracket, cy-size, paint);
+            canvas.drawLine(cx-size, cy-size, cx-size, cy-size+bracket, paint);
+            // Top Right
+            canvas.drawLine(cx+size, cy-size, cx+size-bracket, cy-size, paint);
+            canvas.drawLine(cx+size, cy-size, cx+size, cy-size+bracket, paint);
+            // Bottom Left
+            canvas.drawLine(cx-size, cy+size, cx-size+bracket, cy+size, paint); 
+            canvas.drawLine(cx-size, cy+size, cx-size, cy+size-bracket, paint);
+            // Bottom Right
+            canvas.drawLine(cx+size, cy+size, cx+size-bracket, cy+size, paint);
+            canvas.drawLine(cx+size, cy+size, cx+size, cy+size-bracket, paint);
+            
             paint.setStyle(Paint.Style.FILL); canvas.drawCircle(cx, cy, 3, paint); paint.setStyle(Paint.Style.STROKE);
             postInvalidateDelayed(50);
         }
@@ -1546,6 +1573,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         if (isHomeWifiRunning) {
             try { unregisterReceiver(alphaWifiReceiver); } catch (Exception e) {}
+            alphaWifiManager.disconnect(); 
             isHomeWifiRunning = false;
         }
         if (isHotspotRunning) {

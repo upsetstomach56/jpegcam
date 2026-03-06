@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Alpha OS Dashboard</title>
+    <title>filmOS Dashboard</title>
     <style>
         :root { --bg-dark: #0a0a0a; --bg-panel: #1a1a1a; --accent: #ff5000; --text-main: #ffffff; --text-muted: #888888; }
         body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background-color: var(--bg-dark); color: var(--text-main); -webkit-user-select: none; }
@@ -28,6 +28,8 @@
         .card.selected .sel-indicator { background: var(--accent); border-color: var(--accent); }
         .card.selected .sel-indicator::after { content: '✓'; color: white; font-size: 12px; position: absolute; left: 4px; top: 0px; font-weight: bold; }
         
+        .load-more-container { grid-column: 1 / -1; text-align: center; padding: 20px 0; }
+        
         #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; cursor: zoom-out; }
         #lightbox img { max-width: 90%; max-height: 65vh; border-radius: 2px; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); cursor: default; }
         .lb-meta { margin-top: 20px; text-align: center; max-width: 90%; pointer-events: none; }
@@ -38,7 +40,7 @@
 <body>
 
     <header>
-        <h3 style="margin:0; letter-spacing:1px; font-weight:900;">ALPHA OS DASHBOARD</h3>
+        <h3 style="margin:0; letter-spacing:1px; font-weight:900;">filmOS DASHBOARD</h3>
         <div class="sys-info" id="sys-info">SYNCING HARDWARE...</div>
     </header>
 
@@ -81,6 +83,9 @@
         let rotation = 0;
         let viewName = "";
         let abortController = null;
+        
+        let currentPage = 1;
+        const PAGE_SIZE = 24;
 
         async function init() {
             const res = await fetch('/api/system');
@@ -99,7 +104,7 @@
                 const data = await res.json();
                 currentFiles = data.files;
                 selected.clear();
-                render();
+                render(true);
             } catch (err) { if(err.name !== 'AbortError') console.error(err); }
         }
 
@@ -114,17 +119,28 @@
             filter = f;
             document.getElementById('f-all').classList.toggle('active', f === 'all');
             document.getElementById('f-today').classList.toggle('active', f === 'today');
-            render();
+            render(true);
         }
 
-        function render() {
+        function render(resetPage = false) {
+            if (resetPage) currentPage = 1;
+            
             const container = document.getElementById('gallery');
-            container.innerHTML = '';
+            if (resetPage) container.innerHTML = '';
+            else {
+                // Remove old load more button if it exists
+                const oldBtn = document.getElementById('load-more-btn');
+                if (oldBtn) oldBtn.remove();
+            }
+            
             const now = new Date();
             const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const filtered = currentFiles.filter(f => filter === 'all' || f.date >= startOfToday);
+            
+            const startIndex = (currentPage - 1) * PAGE_SIZE;
+            const paginated = filtered.slice(startIndex, currentPage * PAGE_SIZE);
 
-            filtered.forEach(f => {
+            paginated.forEach(f => {
                 const card = document.createElement('div');
                 card.className = `card ${selected.has(f.name) ? 'selected' : ''}`;
                 card.onclick = () => toggleSel(f.name);
@@ -136,16 +152,44 @@
                 `;
                 container.appendChild(card);
             });
+            
+            if (filtered.length > currentPage * PAGE_SIZE) {
+                const loadMoreDiv = document.createElement('div');
+                loadMoreDiv.id = 'load-more-btn';
+                loadMoreDiv.className = 'load-more-container';
+                loadMoreDiv.innerHTML = `<button class="action-btn secondary-btn" onclick="loadMore()">LOAD MORE PHOTOS</button>`;
+                container.appendChild(loadMoreDiv);
+            }
+            
             updateUI();
+        }
+        
+        function loadMore() {
+            currentPage++;
+            render(false);
         }
 
         function toggleSel(name) {
             if(selected.has(name)) selected.delete(name);
             else selected.add(name);
-            render();
+            
+            // Just update the classes instead of a full re-render to keep pagination intact
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(card => {
+                const title = card.querySelector('.card-info span').innerText;
+                if (title === name) {
+                    if (selected.has(name)) card.classList.add('selected');
+                    else card.classList.remove('selected');
+                }
+            });
+            updateUI();
         }
 
-        function unselectAll() { selected.clear(); render(); }
+        function unselectAll() { 
+            selected.clear(); 
+            document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+            updateUI(); 
+        }
 
         function updateUI() {
             document.getElementById('sel-count').innerText = `${selected.size} ITEMS SELECTED`;
@@ -164,15 +208,10 @@
             img.style.transform = `rotate(0deg) scale(1)`;
             meta.innerHTML = `<span class="exif-tag">READING EXIF...</span>`;
             
-            if(mode === 'DCIM') {
-                parseMetadata(`/full/?folder=${mode}&name=${name}`);
-            } else {
-                meta.innerHTML = `<span class="exif-tag" style="color:cyan; border-color:cyan;">FILM OS RECIPE • ${viewName}</span>`;
-            }
+            parseMetadata(`/full/?folder=${mode}&name=${name}`);
             lb.style.display = 'flex';
         }
 
-        // TRUE EXIF BINARY PARSER
         async function parseMetadata(url) {
             try {
                 const response = await fetch(url, { headers: { 'Range': 'bytes=0-65536' } });
@@ -186,10 +225,11 @@
                     let speed = exif.shutter ? (exif.shutter < 1 ? `1/${Math.round(1/exif.shutter)}s` : `${exif.shutter}s`) : '--s';
                     let iso = exif.iso ? `ISO ${exif.iso}` : 'ISO --';
                     
-                    let details = [viewName, focal, fnum, speed, iso].filter(Boolean).join(' • ');
-                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">${details}</span>`;
+                    let prefix = mode === 'GRADED' ? `filmOS RECIPE • ${viewName}` : viewName;
+                    let details = [prefix, focal, fnum, speed, iso].filter(Boolean).join(' • ');
+                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag" ${mode === 'GRADED' ? 'style="color:cyan; border-color:cyan;"' : ''}>${details}</span>`;
                 } else {
-                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">${viewName} • NO DATA</span>`;
+                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">${viewName} • NO METADATA</span>`;
                 }
             } catch (e) { 
                 document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">METADATA ERROR</span>`; 
@@ -209,16 +249,16 @@
         }
 
         function parseTags(view, start) {
-            if (view.getUint32(start, false) !== 0x45786966) return null; // "Exif"
+            if (view.getUint32(start, false) !== 0x45786966) return null; 
             const tiffOffset = start + 6;
-            const le = view.getUint16(tiffOffset, false) === 0x4949; // Little Endian check
+            const le = view.getUint16(tiffOffset, false) === 0x4949; 
             const ifd0Offset = view.getUint32(tiffOffset + 4, le);
 
             let subIfdOffset = 0;
             let entries = view.getUint16(tiffOffset + ifd0Offset, le);
             for (let i = 0; i < entries; i++) {
                 let entryOffset = tiffOffset + ifd0Offset + 2 + (i * 12);
-                if (view.getUint16(entryOffset, le) === 0x8769) { // ExifOffset Tag
+                if (view.getUint16(entryOffset, le) === 0x8769) { 
                     subIfdOffset = view.getUint32(entryOffset + 8, le);
                     break;
                 }
