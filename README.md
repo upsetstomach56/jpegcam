@@ -1,4 +1,4 @@
-# Sony JPG Cookbook - In-Camera LUT Support (BETA)
+# filmOS - In-Camera LUT Support (BETA)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jbuchanan)
 
 **⚠️ BETA STATUS:** This project is currently in early beta. While it is stable and produces high-quality results, it is a "proof of concept" running on 2014-era hardware.
