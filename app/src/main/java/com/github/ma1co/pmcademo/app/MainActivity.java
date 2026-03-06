@@ -12,6 +12,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -123,15 +124,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isHomeWifiRunning = false;
     private boolean isHotspotRunning = false;
 
-    public static final int DIAL_MODE_RTL = 0;
-    public static final int DIAL_MODE_SHUTTER = 1;
-    public static final int DIAL_MODE_APERTURE = 2;
-    public static final int DIAL_MODE_ISO = 3;
-    public static final int DIAL_MODE_EXPOSURE = 4;
-    public static final int DIAL_MODE_REVIEW = 5;
+    // Phase 9.1: Clockwise UI Nav Mapping
+    public static final int DIAL_MODE_SHUTTER = 0;
+    public static final int DIAL_MODE_APERTURE = 1;
+    public static final int DIAL_MODE_ISO = 2;
+    public static final int DIAL_MODE_EXPOSURE = 3;
+    public static final int DIAL_MODE_REVIEW = 4;
+    public static final int DIAL_MODE_RTL = 5;
     public static final int DIAL_MODE_PASM = 6;
     public static final int DIAL_MODE_FOCUS = 7;
-    private int mDialMode = DIAL_MODE_RTL;
+    private int mDialMode = DIAL_MODE_RTL; // Default to top center
 
     private float lastKnownFocusRatio = 0.5f;
     private float lastKnownAperture = 2.8f;
@@ -162,8 +164,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override
         public void run() {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
-                
-                // Self-Healing UI Trap: Checks physical hardware switch to see if shutter is actively held down
                 if (ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0) {
                     if (afOverlay != null && afOverlay.isPolling()) {
                         afOverlay.stopFocus(mCamera);
@@ -178,7 +178,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         tvReview.setVisibility(View.VISIBLE);
                     }
                 }
-                
                 updateMainHUD();
             }
             uiHandler.postDelayed(this, 500); 
@@ -702,7 +701,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
             p.set("sony-dro", prof.dro.toLowerCase());
             
-            // Phase 9: TRUE SONY WB SHIFT INJECTION
             p.set("light-balance-for-white-balance", prof.wbShift); // A-B Shift
             p.set("color-compensation-for-white-balance", prof.wbShiftGM); // G-M Shift
             
@@ -714,6 +712,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
+            // Phase 9.1: Reset dial selection to top-center (RTL) upon shutter half-press
+            mDialMode = DIAL_MODE_RTL; 
+            
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE); llBottomBar.setVisibility(View.GONE);
                 tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocusMode.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
@@ -1311,11 +1312,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public AdvancedFocusMeterView(Context context) {
             super(context);
             trackPaint = new Paint(); 
-            trackPaint.setColor(Color.argb(150, 200, 200, 200)); 
+            trackPaint.setColor(Color.argb(150, 100, 100, 100)); // Darker grey for cinema look
             trackPaint.setStrokeWidth(4);
             
             dofPaint = new Paint(); 
-            dofPaint.setColor(Color.argb(180, 50, 150, 255)); 
+            // Phase 9.1: filmOS Theme Orange
+            dofPaint.setColor(Color.argb(180, 230, 50, 15)); 
             dofPaint.setStrokeWidth(12);
             dofPaint.setStrokeCap(Paint.Cap.ROUND);
             
@@ -1328,6 +1330,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             textPaint.setColor(Color.WHITE); 
             textPaint.setTextSize(18); 
             textPaint.setAntiAlias(true); 
+            textPaint.setTypeface(Typeface.DEFAULT_BOLD);
             textPaint.setTextAlign(Paint.Align.CENTER);
         }
 
@@ -1342,10 +1345,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 int y = h / 2 + 10;
 
                 bgCanvas.drawLine(pad, y, w - pad, y, trackPaint);
-                bgCanvas.drawText("0.1m", pad, y - 20, textPaint);
+                
+                // Draw professional tick marks
+                for (int i = 0; i <= 4; i++) {
+                    float tickX = pad + (trackW * (i / 4.0f));
+                    bgCanvas.drawLine(tickX, y - 8, tickX, y + 8, trackPaint);
+                }
+
+                bgCanvas.drawText("MACRO", pad, y - 20, textPaint);
                 bgCanvas.drawText("0.5m", pad + trackW * 0.25f, y - 20, textPaint);
-                bgCanvas.drawText("1m", pad + trackW * 0.5f, y - 20, textPaint);
-                bgCanvas.drawText("5m", pad + trackW * 0.75f, y - 20, textPaint);
+                bgCanvas.drawText("1.0m", pad + trackW * 0.5f, y - 20, textPaint);
+                bgCanvas.drawText("3.0m", pad + trackW * 0.75f, y - 20, textPaint);
                 bgCanvas.drawText("INF", w - pad, y - 20, textPaint);
             }
         }
@@ -1371,16 +1381,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             int y = h / 2 + 10;
             float needleX = pad + (trackW * ratio);
 
-            float baseDof = (aperture / 22.0f) * (trackW * 0.15f);
-            float distanceMultiplier = 1.0f + (ratio * 2.0f); 
-            float dofRadius = baseDof * distanceMultiplier;
+            // Phase 9.1: Exponential DoF optical distribution simulation
+            float apFactor = aperture / 22.0f;
+            float ratioExp = ratio * ratio; 
+            
+            float dofSpread = (trackW * 0.015f) + (trackW * 0.35f * apFactor * ratioExp);
+            float leftRadius = dofSpread * 0.35f;
+            float rightRadius = dofSpread * 0.65f; // Physics dictates more DoF behind subject than in front
+            
+            if (ratio > 0.95f) rightRadius = trackW; 
 
             canvas.save();
             canvas.clipRect(pad, 0, w - pad, h);
-            canvas.drawLine(needleX - dofRadius, y, needleX + dofRadius, y, dofPaint);
+            canvas.drawLine(needleX - leftRadius, y, needleX + rightRadius, y, dofPaint);
             canvas.restore();
             
-            canvas.drawLine(needleX, y - 15, needleX, y + 15, needlePaint);
+            canvas.drawLine(needleX, y - 18, needleX, y + 18, needlePaint);
+            
+            // Draw a cinema focus pointer triangle
+            Path path = new Path();
+            path.moveTo(needleX, y - 24);
+            path.lineTo(needleX - 8, y - 36);
+            path.lineTo(needleX + 8, y - 36);
+            path.close();
+            canvas.drawPath(path, needlePaint);
         }
     }
 
@@ -1432,16 +1456,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             int cx = getWidth() / 2, cy = getHeight() / 2, size = 60, bracket = 15;
             
-            // Top Left
             canvas.drawLine(cx-size, cy-size, cx-size+bracket, cy-size, paint);
             canvas.drawLine(cx-size, cy-size, cx-size, cy-size+bracket, paint);
-            // Top Right
             canvas.drawLine(cx+size, cy-size, cx+size-bracket, cy-size, paint);
             canvas.drawLine(cx+size, cy-size, cx+size, cy-size+bracket, paint);
-            // Bottom Left
             canvas.drawLine(cx-size, cy+size, cx-size+bracket, cy+size, paint); 
             canvas.drawLine(cx-size, cy+size, cx-size, cy+size-bracket, paint);
-            // Bottom Right
             canvas.drawLine(cx+size, cy+size, cx+size-bracket, cy+size, paint);
             canvas.drawLine(cx+size, cy+size, cx+size, cy+size-bracket, paint);
             
