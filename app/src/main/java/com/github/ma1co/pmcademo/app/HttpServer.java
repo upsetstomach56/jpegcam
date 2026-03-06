@@ -36,7 +36,8 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
-            // PHASE 9.5: RAW BINARY STREAM LISTENER (Bypasses NanoHTTPD Temp Files entirely)
+            // PHASE 9.5: PURE RAW BINARY STREAM LISTENER
+            // Completely bypasses NanoHTTPD's internal parser and Temp File limits
             if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
                 try {
                     String fileName = session.getHeaders().get("x-file-name");
@@ -51,7 +52,7 @@ public class HttpServer extends NanoHTTPD {
                     if (!lutDir.exists()) lutDir.mkdirs();
                     File destFile = new File(lutDir, fileName);
 
-                    // Read raw bytes straight from the network socket directly to the SD card!
+                    // Stream raw bytes directly from the network socket to the SD card
                     InputStream in = session.getInputStream();
                     FileOutputStream out = new FileOutputStream(destFile);
                     
