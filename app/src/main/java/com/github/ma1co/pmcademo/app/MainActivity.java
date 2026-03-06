@@ -50,7 +50,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false; 
     
-    // Selective Snapshot variables (avoids illegal read-only HAL overwrites)
+    // Selective Snapshot variables (Walled Garden to protect out-of-app settings)
+    private String origSceneMode = null;
+    private String origFocusMode = null;
     private String origWhiteBalance = null;
     private String origDroMode = null;
     private String origDroLevel = null;
@@ -61,7 +63,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private String origWbShiftMode = null;
     private String origWbShiftLb = null;
     private String origWbShiftCc = null;
-    private String origFocusMode = null;
     
     private FrameLayout mainUIContainer;
     private LinearLayout menuContainer; 
@@ -176,7 +177,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public void run() {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
                 
-                // Only force UI back on if NEITHER shutter stage is pressed (Fixes UI flicker)
                 boolean s1_1_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0;
                 boolean s1_2_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_2).status == 0;
                 
@@ -204,7 +204,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Stop Android OS from complaining about missing thumbnail directory
         File thumbsDir = new File(Environment.getExternalStorageDirectory(), "DCIM/.thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
         
@@ -623,7 +622,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // Completely ripped out SharedPreferences; strictly write to SD Card to prevent OS from wiping it.
+    // Force strict SD Card save logic (avoids Sony OS SharedPreferences wipe)
     private void savePreferences() {
         try {
             File lutDir = getLutDir();
@@ -652,7 +651,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
     }
 
-    // Completely ripped out SharedPreferences; strictly read from SD Card.
     private void loadPreferences() {
         File backupFile = new File(getLutDir(), "RTLBAK.TXT");
         if (backupFile.exists()) {
@@ -1061,6 +1059,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             else if (mDialMode == DIAL_MODE_PASM) {
                 List<String> modes = p.getSupportedSceneModes();
                 if (modes != null) { 
+                    // Make SURE shutter-priority is captured properly
                     List<String> validPasm = new ArrayList<String>();
                     String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto", "auto", "intelligent-active"};
                     for(String m : desired) { if (modes.contains(m)) validPasm.add(m); }
@@ -1112,10 +1111,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             tvMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
             String sceneMode = params.getSceneMode();
             if (sceneMode != null) {
-                if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_MANUAL_EXPOSURE)) tvMode.setText("M");
-                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_APERTURE_PRIORITY)) tvMode.setText("A");
-                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_SHUTTER_PRIORITY)) tvMode.setText("S");
-                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_PROGRAM_AUTO)) tvMode.setText("P");
+                // BUG FIX: Ensure exact string matching for PASM letters, particularly 'S'
+                if (sceneMode.equals("manual-exposure")) tvMode.setText("M");
+                else if (sceneMode.equals("aperture-priority")) tvMode.setText("A");
+                else if (sceneMode.equals("shutter-priority")) tvMode.setText("S");
+                else if (sceneMode.equals("program-auto")) tvMode.setText("P");
                 else if (sceneMode.equals("auto") || sceneMode.equals("intelligent-active")) tvMode.setText("AUTO");
                 else tvMode.setText("SCN"); 
             }
@@ -1197,10 +1197,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
-                // SELECTIVE SNAPSHOT: Only capture what we actually modify
-                if (origWhiteBalance == null && mCamera != null) {
+                // SELECTIVE SNAPSHOT: Capture exact pre-app state for modified variables only
+                if (origSceneMode == null && mCamera != null) {
                     try {
                         Camera.Parameters p = mCamera.getParameters();
+                        origSceneMode = p.getSceneMode();
+                        origFocusMode = p.getFocusMode();
                         origWhiteBalance = p.getWhiteBalance();
                         origDroMode = p.get("dro-mode");
                         origDroLevel = p.get("dro-level");
@@ -1211,7 +1213,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         origWbShiftMode = p.get("white-balance-shift-mode");
                         origWbShiftLb = p.get("white-balance-shift-lb");
                         origWbShiftCc = p.get("white-balance-shift-cc");
-                        origFocusMode = p.getFocusMode();
                     } catch (Exception e) {}
                 }
                 
@@ -1298,10 +1299,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
-        // SELECTIVE RESTORE: Safely put everything exactly back to where it was without touching Read-Only stuff
-        if (mCamera != null && origWhiteBalance != null) {
+        // SELECTIVE RESTORE: Perfect rollback of only the settings we manipulated
+        if (mCamera != null && origSceneMode != null) {
             try {
                 Camera.Parameters p = mCamera.getParameters();
+                if (origSceneMode != null) p.setSceneMode(origSceneMode);
+                if (origFocusMode != null) p.setFocusMode(origFocusMode);
                 if (origWhiteBalance != null) p.setWhiteBalance(origWhiteBalance);
                 if (origDroMode != null) p.set("dro-mode", origDroMode);
                 if (origDroLevel != null) p.set("dro-level", origDroLevel);
@@ -1312,7 +1315,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 if (origWbShiftMode != null) p.set("white-balance-shift-mode", origWbShiftMode);
                 if (origWbShiftLb != null) p.set("white-balance-shift-lb", origWbShiftLb);
                 if (origWbShiftCc != null) p.set("white-balance-shift-cc", origWbShiftCc);
-                if (origFocusMode != null) p.setFocusMode(origFocusMode);
                 mCamera.setParameters(p);
             } catch (Exception e) {}
         }

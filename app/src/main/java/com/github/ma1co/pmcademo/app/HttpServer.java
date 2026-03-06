@@ -12,23 +12,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import fi.iki.elonen.NanoHTTPD;
-import fi.iki.elonen.NanoHTTPD.IHTTPSession;
-import fi.iki.elonen.NanoHTTPD.Method;
-import fi.iki.elonen.NanoHTTPD.Response;
-import fi.iki.elonen.NanoHTTPD.TempFile;
-import fi.iki.elonen.NanoHTTPD.TempFileManager;
-import fi.iki.elonen.NanoHTTPD.TempFileManagerFactory;
 
 public class HttpServer extends NanoHTTPD {
     public static final int PORT = 8080;
@@ -37,47 +28,6 @@ public class HttpServer extends NanoHTTPD {
     public HttpServer(Context context) {
         super(PORT);
         this.context = context;
-        
-        this.setTempFileManagerFactory(new TempFileManagerFactory() {
-            @Override
-            public TempFileManager create() {
-                return new AndroidTempFileManager();
-            }
-        });
-    }
-
-    // FIX: Using a NON-HIDDEN folder ("tmp" instead of ".tmp") 
-    // FAT32 FUSE blocks hidden directory creation, causing the crash.
-    private static class AndroidTempFile implements TempFile {
-        private File file;
-        private OutputStream fstream;
-        public AndroidTempFile() throws IOException {
-            File cacheDir = new File(Environment.getExternalStorageDirectory(), "LUTS/tmp");
-            if (!cacheDir.exists()) cacheDir.mkdirs();
-            file = File.createTempFile("Nano-", "", cacheDir);
-            fstream = new FileOutputStream(file);
-        }
-        @Override public void delete() throws Exception { file.delete(); }
-        @Override public String getName() { return file.getAbsolutePath(); }
-        @Override public OutputStream open() throws Exception { return fstream; }
-    }
-
-    private static class AndroidTempFileManager implements TempFileManager {
-        private List<TempFile> tempFiles;
-        public AndroidTempFileManager() {
-            this.tempFiles = new ArrayList<TempFile>();
-        }
-        @Override public void clear() {
-            for (TempFile file : tempFiles) {
-                try { file.delete(); } catch (Exception ignored) {}
-            }
-            tempFiles.clear();
-        }
-        @Override public TempFile createTempFile(String filename_hint) throws Exception {
-            AndroidTempFile tempFile = new AndroidTempFile();
-            tempFiles.add(tempFile);
-            return tempFile;
-        }
     }
 
     @Override
@@ -86,38 +36,45 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
+            // PURE RAW BINARY STREAM LISTENER 
+            // Completely bypasses NanoHTTPD's internal parser and Temp File limits
             if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
                 try {
-                    Map<String, String> files = new HashMap<String, String>();
-                    session.parseBody(files);
-                    String tempFilePath = files.get("file");
-                    String originalFileName = session.getParms().get("file");
-
-                    if (tempFilePath != null && originalFileName != null) {
-                        File lutDir = new File(root, "LUTS");
-                        if (!lutDir.exists()) lutDir.mkdirs();
-                        
-                        if (!originalFileName.toLowerCase().endsWith(".cube") && !originalFileName.toLowerCase().endsWith(".cub")) {
-                            return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Only .cube files allowed\"}");
-                        }
-
-                        File destFile = new File(lutDir, originalFileName);
-                        
-                        FileInputStream in = new FileInputStream(tempFilePath);
-                        FileOutputStream out = new FileOutputStream(destFile);
-                        byte[] buffer = new byte[8192];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
-                        }
-                        in.close();
-                        out.flush();
-                        out.close();
-
-                        return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
-                    } else {
-                        return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"No file provided\"}");
+                    Map<String, String> headers = session.getHeaders();
+                    String fileName = headers.get("x-file-name");
+                    
+                    if (fileName == null || (!fileName.toLowerCase().endsWith(".cube") && !fileName.toLowerCase().endsWith(".cub"))) {
+                        return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Invalid filename\"}");
                     }
+
+                    String contentLengthStr = headers.get("content-length");
+                    int contentLength = contentLengthStr != null ? Integer.parseInt(contentLengthStr) : 0;
+
+                    File lutDir = new File(root, "LUTS");
+                    if (!lutDir.exists()) lutDir.mkdirs();
+                    File destFile = new File(lutDir, fileName);
+
+                    // Stream raw bytes directly from the network socket to the SD card
+                    InputStream in = session.getInputStream();
+                    FileOutputStream out = new FileOutputStream(destFile);
+                    
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    int totalRead = 0;
+                    
+                    // Read exactly the amount of bytes sent by the browser
+                    while (totalRead < contentLength) {
+                        int bytesToRead = Math.min(buffer.length, contentLength - totalRead);
+                        read = in.read(buffer, 0, bytesToRead);
+                        if (read == -1) break;
+                        out.write(buffer, 0, read);
+                        totalRead += read;
+                    }
+                    
+                    out.flush();
+                    out.close();
+
+                    return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
                 } catch (Exception e) {
                     return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Upload failed\"}");
                 }
