@@ -54,9 +54,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private FrameLayout mainUIContainer;
     private LinearLayout menuContainer; 
     private TextView tvMenuTitle;
-    private TextView[] tvPageNumbers = new TextView[4]; // Expanded to 4 Pages
+    private TextView[] tvPageNumbers = new TextView[4];
     private LinearLayout menuHeaderLayout;
-    private LinearLayout[] menuRows = new LinearLayout[7]; // 7 Items Max per page
+    private LinearLayout[] menuRows = new LinearLayout[7]; 
     private TextView[] menuLabels = new TextView[7];
     private TextView[] menuValues = new TextView[7];
     
@@ -741,28 +741,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 p.setWhiteBalance(targetWb);
             }
 
-            // PHASE 9.4: Safe DRO Injection derived from PARAMS.TXT
+            // EXACT INJECTION FROM PARAMS DUMP TO PREVENT HAL CORRUPTION
             if (p.get("dro-mode") != null) {
                 if ("OFF".equals(prof.dro)) {
                     p.set("dro-mode", "off");
                 } else if ("AUTO".equals(prof.dro)) {
                     p.set("dro-mode", "auto");
                 } else if (prof.dro.startsWith("LV")) {
-                    p.set("dro-mode", "on"); // Mode must be 'on' to use level
-                    try {
-                        int lvl = Integer.parseInt(prof.dro.replace("LV", ""));
-                        p.set("dro-level", lvl);
-                    } catch(Exception e){}
+                    p.set("dro-mode", "on"); 
+                    try { p.set("dro-level", Integer.parseInt(prof.dro.replace("LV", ""))); } catch(Exception e){}
                 }
             } else if (p.get("sony-dro") != null) {
                 p.set("sony-dro", prof.dro.toLowerCase()); 
             }
             
-            p.set("light-balance-for-white-balance", String.valueOf(prof.wbShift));
-            p.set("color-compensation-for-white-balance", String.valueOf(prof.wbShiftGM)); 
-            p.set("contrast", String.valueOf(prof.contrast));
-            p.set("saturation", String.valueOf(prof.saturation));
-            p.set("sharpness", String.valueOf(prof.sharpness));
+            if (p.get("contrast") != null) p.set("contrast", prof.contrast);
+            if (p.get("saturation") != null) p.set("saturation", prof.saturation);
+            if (p.get("sharpness") != null) p.set("sharpness", prof.sharpness);
+            
+            if (p.get("white-balance-shift-mode") != null) {
+                p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
+            }
+            
+            if (p.get("light-balance-for-white-balance") != null) p.set("light-balance-for-white-balance", prof.wbShift);
+            if (p.get("color-compensation-for-white-balance") != null) p.set("color-compensation-for-white-balance", prof.wbShiftGM); 
             
             mCamera.setParameters(p);
         } catch (Exception e) {}
