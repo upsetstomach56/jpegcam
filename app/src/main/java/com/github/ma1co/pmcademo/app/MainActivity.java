@@ -180,13 +180,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override 
             public void onPreloadStarted() { 
                 isReady = false; 
-                runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); 
+                runOnUiThread(new Runnable() { 
+                    public void run() { 
+                        updateMainHUD(); 
+                    } 
+                }); 
             }
+
             @Override 
             public void onPreloadFinished(boolean success) { 
                 isReady = true; 
-                runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); 
+                runOnUiThread(new Runnable() { 
+                    public void run() { 
+                        updateMainHUD(); 
+                    } 
+                }); 
             }
+
             @Override 
             public void onProcessStarted() { 
                 runOnUiThread(new Runnable() { 
@@ -196,6 +206,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     } 
                 }); 
             }
+
             @Override 
             public void onProcessFinished(String res) { 
                 isProcessing = false; 
@@ -214,9 +225,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public boolean isReadyToProcess() { 
                 return isReady && !isProcessing && recipeManager.getCurrentProfile().lutIndex != 0; 
             }
+
             @Override 
             public void onNewPhotoDetected(final String path) { 
-                // CRITICAL FIX: Math-based polling to wait for SD card hardware to finish writing the giant RAW+JPG buffer
                 processWhenFileReady(path);
             }
         });
@@ -225,7 +236,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void processWhenFileReady(final String path) {
-        isProcessing = true; // Lock the UI and Shutter instantly to protect RAM
+        isProcessing = true; 
         runOnUiThread(new Runnable() { 
             public void run() { 
                 tvTopStatus.setText("SAVING TO SD..."); 
@@ -243,16 +254,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
-                    // File size stabilized, it is perfectly safe to hand to the C++ engine
                     File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
                     mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
                 } else if (retries[0] < 30) { 
-                    // File is still growing, wait and check again (Max wait 15 seconds)
                     lastSize[0] = currentSize;
                     retries[0]++;
                     uiHandler.postDelayed(this, 500);
                 } else {
-                    // Failsafe timeout
                     isProcessing = false;
                     updateMainHUD();
                 }
@@ -268,8 +276,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onShutterHalfPressed() {
-        if (isPlaybackMode) { exitPlayback(); return; }
-        if (isProcessing) return; // Prevent RAM overload
+        if (isPlaybackMode) { 
+            exitPlayback(); 
+            return; 
+        }
+        if (isMenuOpen) { 
+            exitMenu(); 
+            return; 
+        }
+        if (isProcessing) {
+            return; 
+        }
         
         mDialMode = DIAL_MODE_RTL;
         if (displayState == 0 && !isMenuOpen) {
@@ -282,7 +299,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (!"manual".equals(c.getParameters().getFocusMode())) {
                     afOverlay.startFocus(c); 
                 }
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                // Ignore focus start errors
+            }
         }
     }
 
@@ -303,29 +322,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onMenuPressed() {
-        if (isPlaybackMode) { exitPlayback(); return; }
-        if (isProcessing) return; // Lock menu during processing
+        if (isPlaybackMode) { 
+            exitPlayback(); 
+            return; 
+        }
+        if (isProcessing) {
+            return; 
+        }
         
-        isMenuOpen = !isMenuOpen;
-        if (isMenuOpen) {
+        if (!isMenuOpen) {
             recipeManager.scanRecipes(); 
             menuManager.setPage(1); 
             menuContainer.setVisibility(View.VISIBLE); 
             mainUIContainer.setVisibility(View.GONE); 
+            isMenuOpen = true;
             renderMenu();
         } else {
-            menuContainer.setVisibility(View.GONE); 
-            mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE); 
-            recipeManager.savePreferences(); 
-            triggerLutPreload(); 
-            updateMainHUD();
+            exitMenu();
         }
+    }
+
+    private void exitMenu() {
+        isMenuOpen = false;
+        menuContainer.setVisibility(View.GONE); 
+        mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE); 
+        recipeManager.savePreferences(); 
+        triggerLutPreload(); 
+        applyHardwareRecipe();
+        syncHardwareState();
+        updateMainHUD();
     }
 
     @Override 
     public void onEnterPressed() {
-        if (isPlaybackMode) { exitPlayback(); return; }
-        if (isProcessing) return;
+        if (isPlaybackMode) { 
+            exitPlayback(); 
+            return; 
+        }
+        if (isProcessing) {
+            return;
+        }
         
         if (!isMenuOpen) {
             if (mDialMode == DIAL_MODE_REVIEW) {
@@ -334,8 +370,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE); 
             }
-        } else if (menuManager.getCurrentPage() == 4) { 
-            handleConnectionAction(); 
+        } else {
+            if (menuManager.getSelection() == -1) {
+                exitMenu();
+            } else if (menuManager.getCurrentPage() == 4) { 
+                handleConnectionAction(); 
+            }
         }
     }
 
@@ -398,7 +438,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void handleHardwareInput(int d) {
         Camera c = cameraManager.getCamera(); 
         CameraEx cx = cameraManager.getCameraEx();
-        if (c == null || cx == null) return;
+        
+        if (c == null || cx == null) {
+            return;
+        }
         
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cx.createParametersModifier(p);
@@ -409,12 +452,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             triggerLutPreload(); 
         }
         else if (mDialMode == DIAL_MODE_SHUTTER) { 
-            if (d > 0) cx.incrementShutterSpeed(); 
-            else cx.decrementShutterSpeed(); 
+            if (d > 0) {
+                cx.incrementShutterSpeed(); 
+            } else {
+                cx.decrementShutterSpeed(); 
+            }
         }
         else if (mDialMode == DIAL_MODE_APERTURE) { 
-            if (d > 0) cx.incrementAperture(); 
-            else cx.decrementAperture(); 
+            if (d > 0) {
+                cx.incrementAperture(); 
+            } else {
+                cx.decrementAperture(); 
+            }
         }
         else if (mDialMode == DIAL_MODE_ISO) {
             List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
@@ -426,29 +475,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             }
         }
-        // EXPOSURE FIX: Properly calculate EV bounds and apply
         else if (mDialMode == DIAL_MODE_EXPOSURE) {
             int ev = p.getExposureCompensation();
-            int minEv = p.getMinExposureCompensation();
-            int maxEv = p.getMaxExposureCompensation();
-            p.setExposureCompensation(Math.max(minEv, Math.min(maxEv, ev + d)));
+            p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), ev + d)));
             c.setParameters(p);
         }
-        // PASM FIX: Safely map modes and prevent crashing on "Auto"
         else if (mDialMode == DIAL_MODE_PASM) {
             List<String> valid = new ArrayList<String>(); 
-            String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto"};
+            String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "manual-exposure"};
             List<String> supported = p.getSupportedSceneModes();
             if (supported != null) {
                 for (String s : desired) { 
-                    if (supported.contains(s)) valid.add(s); 
+                    if (supported.contains(s)) {
+                        valid.add(s); 
+                    }
                 }
                 if (!valid.isEmpty()) {
                     int idx = valid.indexOf(p.getSceneMode()); 
-                    if (idx == -1) idx = 0; // If currently in 'auto' or 'night', drop them to 'manual' safely
+                    if (idx == -1) {
+                        idx = 0; 
+                    }
                     p.setSceneMode(valid.get((idx + d + valid.size()) % valid.size())); 
                     c.setParameters(p);
                 }
+            }
+        }
+        else if (mDialMode == DIAL_MODE_FOCUS) {
+            List<String> focusModes = p.getSupportedFocusModes();
+            if (focusModes != null && !focusModes.isEmpty()) {
+                int idx = focusModes.indexOf(p.getFocusMode());
+                p.setFocusMode(focusModes.get((idx + d + focusModes.size()) % focusModes.size()));
+                c.setParameters(p);
             }
         }
         
@@ -459,17 +516,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void applyHardwareRecipe() {
         Camera c = cameraManager.getCamera(); 
-        if (c == null) return;
+        if (c == null) {
+            return;
+        }
         
         RTLProfile prof = recipeManager.getCurrentProfile(); 
         Camera.Parameters p = c.getParameters();
         
         String wb = "auto";
-        if ("DAY".equals(prof.whiteBalance)) wb = "daylight"; 
-        else if ("SHD".equals(prof.whiteBalance)) wb = "shade"; 
-        else if ("CLD".equals(prof.whiteBalance)) wb = "cloudy-daylight"; 
-        else if ("INC".equals(prof.whiteBalance)) wb = "incandescent"; 
-        else if ("FLR".equals(prof.whiteBalance)) wb = "fluorescent";
+        if ("DAY".equals(prof.whiteBalance)) {
+            wb = "daylight"; 
+        } else if ("SHD".equals(prof.whiteBalance)) {
+            wb = "shade"; 
+        } else if ("CLD".equals(prof.whiteBalance)) {
+            wb = "cloudy-daylight"; 
+        } else if ("INC".equals(prof.whiteBalance)) {
+            wb = "incandescent"; 
+        } else if ("FLR".equals(prof.whiteBalance)) {
+            wb = "fluorescent";
+        }
         
         p.setWhiteBalance(wb);
         
@@ -495,35 +560,44 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onCameraReady() { 
-        applyHardwareRecipe(); 
+        syncHardwareState();
         updateMainHUD(); 
     }
     
     @Override 
     public void onShutterSpeedChanged() { 
-        runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); 
+        runOnUiThread(new Runnable() { 
+            public void run() { 
+                updateMainHUD(); 
+            } 
+        }); 
     }
     
     @Override 
     public void onApertureChanged() { 
-        runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); 
+        runOnUiThread(new Runnable() { 
+            public void run() { 
+                updateMainHUD(); 
+            } 
+        }); 
     }
     
     @Override 
     public void onIsoChanged() { 
-        runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); 
+        runOnUiThread(new Runnable() { 
+            public void run() { 
+                updateMainHUD(); 
+            } 
+        }); 
     }
     
     @Override 
     public void onFocusPositionChanged(final float ratio) {
         runOnUiThread(new Runnable() { 
             public void run() {
-                if (focusMeter != null && mDialMode == DIAL_MODE_FOCUS) { 
-                    Camera c = cameraManager.getCamera(); 
-                    if (c != null) { 
-                        float ap = cameraManager.getCameraEx().createParametersModifier(c.getParameters()).getAperture() / 100.0f; 
-                        focusMeter.update(ratio, ap, true); 
-                    } 
+                if (focusMeter != null && "manual".equals(cameraManager.getCamera().getParameters().getFocusMode())) { 
+                    float ap = cameraManager.getCameraEx().createParametersModifier(cameraManager.getCamera().getParameters()).getAperture() / 100.0f; 
+                    focusMeter.update(ratio, ap, true); 
                 }
             }
         });
@@ -533,6 +607,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onStatusUpdate(String target, String status) { 
         if (isMenuOpen && menuManager.getCurrentPage() == 4) {
             renderMenu(); 
+        }
+    }
+
+    private void syncHardwareState() {
+        Camera c = cameraManager.getCamera();
+        if (c == null) return;
+        
+        String fMode = c.getParameters().getFocusMode();
+        if (focusMeter != null) {
+            focusMeter.setVisibility("manual".equals(fMode) ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -548,12 +632,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         Collections.sort(playbackFiles, new Comparator<File>() { 
-            @Override public int compare(File f1, File f2) { 
+            @Override 
+            public int compare(File f1, File f2) { 
                 return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified()); 
             } 
         });
         
-        if (playbackFiles.isEmpty()) return;
+        if (playbackFiles.isEmpty()) {
+            return;
+        }
         
         isPlaybackMode = true; 
         mainUIContainer.setVisibility(View.GONE); 
@@ -575,11 +662,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void showPlaybackImage(int idx) {
-        if (playbackFiles.isEmpty()) return;
+        if (playbackFiles.isEmpty()) {
+            return;
+        }
         
         if (idx < 0) {
             idx = playbackFiles.size() - 1; 
         }
+        
         if (idx >= playbackFiles.size()) {
             idx = 0; 
         }
@@ -589,9 +679,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         try {
             playbackImageView.setImageBitmap(null);
-            if (currentPlaybackBitmap != null) {
-                currentPlaybackBitmap.recycle();
-                currentPlaybackBitmap = null;
+            if (currentPlaybackBitmap != null) { 
+                currentPlaybackBitmap.recycle(); 
+                currentPlaybackBitmap = null; 
             }
             System.gc();
 
@@ -603,27 +693,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             ExifInterface exif = new ExifInterface(file.getAbsolutePath());
             tvPlaybackInfo.setText((idx + 1) + "/" + playbackFiles.size() + "\n" + file.getName());
             
-            // OOM FIX: Safe memory sampling down to 1.5MB to prevent Dalvik crashes on scroll
             BitmapFactory.Options opts = new BitmapFactory.Options(); 
             opts.inSampleSize = 8; 
             Bitmap raw = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
             
-            if (raw == null) return;
+            if (raw == null) {
+                return;
+            }
 
             int orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rot = 0; 
-            if (orient == ExifInterface.ORIENTATION_ROTATE_90) rot = 90; 
-            else if (orient == ExifInterface.ORIENTATION_ROTATE_180) rot = 180; 
-            else if (orient == ExifInterface.ORIENTATION_ROTATE_270) rot = 270;
+            if (orient == ExifInterface.ORIENTATION_ROTATE_90) {
+                rot = 90; 
+            } else if (orient == ExifInterface.ORIENTATION_ROTATE_180) {
+                rot = 180; 
+            } else if (orient == ExifInterface.ORIENTATION_ROTATE_270) {
+                rot = 270;
+            }
             
             Matrix m = new Matrix(); 
-            if (rot != 0) m.postRotate(rot); 
+            if (rot != 0) {
+                m.postRotate(rot); 
+            }
             m.postScale(0.8888f, 1.0f);
             
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
             playbackImageView.setImageBitmap(bmp);
             currentPlaybackBitmap = bmp;
-            
         } catch (Exception e) {}
     }
 
@@ -634,13 +730,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         if (pg == 1) {
             switch(sel) {
-                case 0: recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); break;
-                case 1: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
-                case 2: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
-                case 3: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
-                case 4: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
-                case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
-                case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                case 0: 
+                    recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); 
+                    break;
+                case 1: 
+                    p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); 
+                    break;
+                case 2: 
+                    p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); 
+                    break;
+                case 3: 
+                    p.grain = Math.max(0, Math.min(5, p.grain + dir)); 
+                    break;
+                case 4: 
+                    p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); 
+                    break;
+                case 5: 
+                    p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); 
+                    break;
+                case 6: 
+                    p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); 
+                    break;
             }
         } else if (pg == 2) {
             switch(sel) {
@@ -648,20 +758,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     int wbi = java.util.Arrays.asList(menuManager.wbLabels).indexOf(p.whiteBalance); 
                     p.whiteBalance = menuManager.wbLabels[(wbi + dir + 6) % 6]; 
                     break;
-                case 1: p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); break;
-                case 2: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); break;
+                case 1: 
+                    p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); 
+                    break;
+                case 2: 
+                    p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); 
+                    break;
                 case 3: 
                     int droi = java.util.Arrays.asList(menuManager.droLabels).indexOf(p.dro); 
                     p.dro = menuManager.droLabels[(droi + dir + 7) % 7]; 
                     break;
-                case 4: p.contrast = Math.max(-3, Math.min(3, p.contrast + dir)); break;
-                case 5: p.saturation = Math.max(-3, Math.min(3, p.saturation + dir)); break;
-                case 6: p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir)); break;
+                case 4: 
+                    p.contrast = Math.max(-3, Math.min(3, p.contrast + dir)); 
+                    break;
+                case 5: 
+                    p.saturation = Math.max(-3, Math.min(3, p.saturation + dir)); 
+                    break;
+                case 6: 
+                    p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir)); 
+                    break;
             }
         } else if (pg == 3) {
             switch(sel) {
-                case 0: recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); break;
-                // BASE SCENE MENU FIX: Explicitly cycle the full list of supported scenes
+                case 0: 
+                    recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); 
+                    break;
                 case 1: 
                     Camera c = cameraManager.getCamera();
                     if (c != null) {
@@ -675,9 +796,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         }
                     }
                     break; 
-                case 2: prefShowFocusMeter = !prefShowFocusMeter; break;
-                case 3: prefShowCinemaMattes = !prefShowCinemaMattes; break;
-                case 4: prefShowGridLines = !prefShowGridLines; break;
+                case 2: 
+                    prefShowFocusMeter = !prefShowFocusMeter; 
+                    break;
+                case 3: 
+                    prefShowCinemaMattes = !prefShowCinemaMattes; 
+                    break;
+                case 4: 
+                    prefShowGridLines = !prefShowGridLines; 
+                    break;
             }
         }
         
@@ -709,7 +836,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public boolean onKeyDown(int k, KeyEvent e) { 
-        // SHUTTER HARD-BLOCK: Physically consume shutter keystrokes to prevent buffer overload while processing
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
             return true; 
         }
@@ -740,7 +866,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         cameraManager.close(); 
         connectivityManager.stopNetworking(); 
         recipeManager.savePreferences(); 
-        try { unregisterReceiver(batteryReceiver); } catch(Exception e) {} 
+        try { 
+            unregisterReceiver(batteryReceiver); 
+        } catch(Exception e) {} 
         uiHandler.removeCallbacks(liveUpdater); 
     }
 
@@ -752,14 +880,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvMode.setVisibility(v); 
         tvFocusMode.setVisibility(v); 
         tvReview.setVisibility(v); 
-        if (focusMeter != null && prefShowFocusMeter) {
-            focusMeter.setVisibility(v); 
+        
+        if (focusMeter != null) {
+            String fm = cameraManager.getCamera().getParameters().getFocusMode();
+            focusMeter.setVisibility(v == View.VISIBLE && "manual".equals(fm) ? View.VISIBLE : View.GONE);
         }
     }
 
     private void updateMainHUD() {
         Camera c = cameraManager.getCamera(); 
-        if (c == null) return;
+        if (c == null) {
+            return;
+        }
         
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cameraManager.getCameraEx().createParametersModifier(p);
@@ -770,13 +902,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         if (!isProcessing) {
             tvTopStatus.setText("RTL " + (recipeManager.getCurrentSlot() + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+            tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.rgb(230, 50, 15) : Color.WHITE);
         }
         
         String sm = p.getSceneMode(); 
-        if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
-        else if ("aperture-priority".equals(sm)) tvMode.setText("A"); 
-        else if ("shutter-priority".equals(sm)) tvMode.setText("S"); 
-        else tvMode.setText("P");
+        if ("manual-exposure".equals(sm)) {
+            tvMode.setText("M"); 
+        } else if ("aperture-priority".equals(sm)) {
+            tvMode.setText("A"); 
+        } else if ("shutter-priority".equals(sm)) {
+            tvMode.setText("S"); 
+        } else if ("program-auto".equals(sm)) {
+            tvMode.setText("P");
+        } else {
+            tvMode.setText("SCN");
+        }
         
         Pair<Integer, Integer> ss = pm.getShutterSpeed(); 
         tvValShutter.setText(ss.first == 1 && ss.second != 1 ? ss.first + "/" + ss.second : ss.first + "\"");
@@ -784,14 +924,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvValIso.setText(pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity());
         tvValEv.setText(String.format("%+.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         
-        tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvReview.setBackgroundColor(mDialMode == DIAL_MODE_REVIEW ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
         tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(230, 50, 15) : Color.WHITE);
+        
+        String fm = p.getFocusMode();
+        if ("auto".equals(fm)) {
+            tvFocusMode.setText("AF-S"); 
+        } else if ("manual".equals(fm)) {
+            tvFocusMode.setText("MF"); 
+        } else if ("continuous-video".equals(fm)) {
+            tvFocusMode.setText("AF-C"); 
+        } else {
+            tvFocusMode.setText("AF");
+        }
+        
         tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(230, 50, 15) : Color.WHITE);
+        
+        if (focusMeter != null) {
+            focusMeter.setVisibility("manual".equals(fm) ? View.VISIBLE : View.GONE);
+        }
         
         gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
         cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
@@ -813,6 +968,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
         tvTopStatus.setGravity(Gravity.CENTER); 
         tvTopStatus.setShadowLayer(4, 0, 0, Color.BLACK);
+        
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
         topParams.setMargins(0, 15, 0, 0); 
         mainUIContainer.addView(tvTopStatus, topParams);
@@ -865,6 +1021,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         llBottomBar = new LinearLayout(this); 
         llBottomBar.setOrientation(LinearLayout.HORIZONTAL); 
         llBottomBar.setGravity(Gravity.CENTER); 
+        
         tvValShutter = createBottomText(); 
         tvValAperture = createBottomText(); 
         tvValIso = createBottomText(); 
