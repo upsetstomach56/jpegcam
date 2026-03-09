@@ -64,55 +64,49 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         return JNI_FALSE;
     }
 
-    // --- PHASE 1: THE MANUAL EXIF & MPF HUNTER ---
     std::vector<uint8_t> exifData;
     int targetOffset = 0;
     int finalScale = scaleDenom;
 
-    // Use heap allocation to prevent Android Stack Overflow (0kb file fix)
-    unsigned char* header = (unsigned char*)malloc(262144); 
+    // Use a 512KB buffer to guarantee we cover the entire header space safely
+    unsigned char* header = (unsigned char*)malloc(524288); 
     if (header) {
-        int readLen = fread(header, 1, 262144, infile);
+        int readLen = fread(header, 1, 524288, infile);
         
-        // 1. Hunt for the EXIF APP1 block
+        // 1. Manually rip the EXIF data so libjpeg doesn't have to manage state
         for (int i = 0; i < readLen - 8; i++) {
             if (header[i] == 0xFF && header[i+1] == 0xE1) {
                 if (header[i+4] == 'E' && header[i+5] == 'x' && header[i+6] == 'i' && header[i+7] == 'f') {
                     int len = (header[i+2] << 8) | header[i+3];
-                    if (i + 2 + len < readLen) {
-                        exifData.assign(header + i + 4, header + i + 2 + len);
+                    int dataLen = len - 2;
+                    if (i + 4 + dataLen <= readLen) {
+                        exifData.assign(header + i + 4, header + i + 4 + dataLen);
                     }
                     break; 
                 }
             }
         }
 
-        // 2. Hunt for the MPF block (1.6MP Thumbnail) ONLY if Proxy mode is requested
+        // 2. We KNOW soiCount == 2 finds the 1.6MP thumbnail perfectly on your camera
         if (scaleDenom == 4) {
-            for (int i = 0; i < readLen - 8; i++) {
-                // Find APP2 marker with "MPF\0" signature
-                if (header[i] == 0xFF && header[i+1] == 0xE2 && 
-                    header[i+4] == 'M' && header[i+5] == 'P' && header[i+6] == 'F' && header[i+7] == 0x00) {
-                    
-                    // Found MPF! Now find the first JPEG Start-Of-Image inside it.
-                    for (int j = i + 8; j < readLen - 2; j++) {
-                        if (header[j] == 0xFF && header[j+1] == 0xD8 && header[j+2] == 0xFF) {
-                            targetOffset = j;
-                            finalScale = 1; // It's already 1.6MP, do not downscale
-                            break;
-                        }
+            int soiCount = 0;
+            for (int i = 0; i < readLen - 1; i++) {
+                if (header[i] == 0xFF && header[i+1] == 0xD8) {
+                    soiCount++;
+                    if (soiCount == 2) {
+                        targetOffset = i;
+                        finalScale = 1; // It's already 1.6MP, do not shrink it further!
+                        break;
                     }
-                    break;
                 }
             }
         }
         free(header);
     }
 
-    // Move file pointer to the 1.6MP preview (or 0 for full res)
+    // Jump straight to the image data we want (Main Image = 0, Thumbnail = targetOffset)
     fseek(infile, targetOffset, SEEK_SET);
 
-    // --- PHASE 2: STANDARD LIBJPEG DECODE/ENCODE ---
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
@@ -127,7 +121,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_stdio_src(&cinfo_d, infile);
     jpeg_read_header(&cinfo_d, TRUE); 
     cinfo_d.scale_num = 1;
-    cinfo_d.scale_denom = finalScale; // Will be 1 for Proxy, 2 for High, 1 for Ultra
+    cinfo_d.scale_denom = finalScale; // Will correctly be 1 for Proxy and Ultra, 2 for High
     cinfo_d.out_color_space = JCS_RGB; 
     jpeg_start_decompress(&cinfo_d);
 
@@ -209,7 +203,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 outG = g + (((lG - g) * opac_mapped) >> 8);
                 outB = b + (((lB - b) * opac_mapped) >> 8);
             }
-            if (rollOff > 0) { outR = (outR>200)?outR-((outR-200)*(outR-200)*rollOff)/11000:outR; outG=(outG>200)?outG-((outG-200)*(outG-200)*rollOff)/11000:outG; outB=(outB>200)?outB-((outB-200)*(outB-200)*rollOff)/11000:outB; }
+            if (rollOff > 0) { 
+                int r_t = (outR > 200) ? outR - ((outR - 200) * (outR - 200) * rollOff) / 11000 : outR;
+                int g_t = (outG > 200) ? outG - ((outG - 200) * (outG - 200) * rollOff) / 11000 : outG;
+                int b_t = (outB > 200) ? outB - ((outB - 200) * (outB - 200) * rollOff) / 11000 : outB;
+                outR = r_t < 0 ? 0 : r_t; outG = g_t < 0 ? 0 : g_t; outB = b_t < 0 ? 0 : b_t;
+            }
             if (vignette > 0) {
                 long long d_sq = ((long long)(x/3)-cx)*((long long)(x/3)-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
                 int v_m = 256 - (int)((d_sq * vig_coef) >> 24); if (v_m < 0) v_m = 0;
