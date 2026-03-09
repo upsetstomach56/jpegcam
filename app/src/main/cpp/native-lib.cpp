@@ -5,11 +5,13 @@
 #include <string.h>
 #include <setjmp.h>
 #include <math.h>
+#include <errno.h>
 #include "jpeglib.h"
 #include <android/log.h>
 
 #define LOG_TAG "filmOS_Native"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 std::vector<uint8_t> nativeLut; 
 int nativeLutSize = 0;
@@ -21,10 +23,10 @@ struct my_error_mgr {
 
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
+    LOGE("libjpeg-turbo encountered a fatal error!");
     longjmp(myerr->setjmp_buffer, 1);
 }
 
-// Fast random number generator for film grain
 inline uint32_t fast_rand(uint32_t* state) {
     uint32_t x = *state;
     x ^= x << 13; 
@@ -37,10 +39,14 @@ inline uint32_t fast_rand(uint32_t* state) {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject /* this */, jstring path) {
     const char *file_path = env->GetStringUTFChars(path, NULL);
-    FILE *file = fopen(file_path, "r");
-    env->ReleaseStringUTFChars(path, file_path);
+    LOGD("Attempting to load LUT from: %s", file_path);
     
-    if (!file) return JNI_FALSE;
+    FILE *file = fopen(file_path, "r");
+    if (!file) {
+        LOGE("Failed to open LUT file. Error: %s", strerror(errno));
+        env->ReleaseStringUTFChars(path, file_path);
+        return JNI_FALSE;
+    }
 
     nativeLut.clear(); 
     nativeLutSize = 0;
@@ -61,6 +67,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
     }
     
     fclose(file); 
+    env->ReleaseStringUTFChars(path, file_path);
+    LOGD("LUT loaded successfully. Size: %d", nativeLutSize);
     return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -75,8 +83,19 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     const char *in_file = env->GetStringUTFChars(inPath, NULL); 
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
     
+    LOGD("Native Process Started.");
+    LOGD("Input: %s", in_file);
+    LOGD("Output: %s", out_file);
+    
     FILE *infile = fopen(in_file, "rb"); 
+    if (!infile) {
+        LOGE("Failed to open input file: %s. Error: %s", in_file, strerror(errno));
+    }
+    
     FILE *outfile = fopen(out_file, "wb");
+    if (!outfile) {
+        LOGE("Failed to open output file: %s. Error: %s", out_file, strerror(errno));
+    }
     
     if (!infile || !outfile) {
         if (infile) fclose(infile); 
@@ -96,6 +115,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_d.err = jpeg_std_error(&jerr_d.pub); 
     jerr_d.pub.error_exit = my_error_exit;
     if (setjmp(jerr_d.setjmp_buffer)) { 
+        LOGE("libjpeg error during decompression setup.");
         jpeg_destroy_decompress(&cinfo_d); 
         fclose(infile); 
         fclose(outfile); 
@@ -112,7 +132,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     
     jpeg_read_header(&cinfo_d, TRUE); 
     
-    // Scale Down implementation for Native Libjpeg-turbo speedups
     cinfo_d.scale_num = 1; 
     cinfo_d.scale_denom = scaleDenom; 
     cinfo_d.out_color_space = JCS_RGB; 
@@ -121,6 +140,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
     jerr_c.pub.error_exit = my_error_exit;
     if (setjmp(jerr_c.setjmp_buffer)) { 
+        LOGE("libjpeg error during compression setup.");
         jpeg_destroy_compress(&cinfo_c); 
         jpeg_destroy_decompress(&cinfo_d); 
         fclose(infile); 
@@ -164,10 +184,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long vig_coef = ((long long)((vignette * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1); 
     int opac_mapped = (opacity * 256) / 100;
     
-    // Process safely in small chunks on the main processing thread
     int chunk_size = 128;
     unsigned char* img_buffer = (unsigned char*)malloc(row_stride * chunk_size);
     if (!img_buffer) { 
+        LOGE("Failed to allocate memory for image buffer.");
         jpeg_destroy_compress(&cinfo_c); 
         jpeg_destroy_decompress(&cinfo_d); 
         fclose(infile); 
@@ -188,7 +208,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             lines_read++;
         }
 
-        // Apply Math safely
         for (int local_y = 0; local_y < lines_read; local_y++) {
             int absolute_y = start_scanline + local_y;
             unsigned char* row = &img_buffer[local_y * row_stride];
@@ -278,6 +297,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
         }
     }
+
+    LOGD("Native Process Complete. Cleaning up...");
 
     free(img_buffer);
     jpeg_finish_compress(&cinfo_c); 
