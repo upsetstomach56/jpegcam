@@ -82,7 +82,6 @@ public class ImageProcessor {
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
-                    mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }

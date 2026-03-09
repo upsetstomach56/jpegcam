@@ -15,6 +15,7 @@ std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
 
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
+
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
     longjmp(myerr->setjmp_buffer, 1);
@@ -66,37 +67,46 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     std::vector<uint8_t> exifData;
     int targetOffset = 0;
-    int finalScale = scaleDenom;
 
-    // Use a 512KB buffer to guarantee we cover the entire header space safely
-    unsigned char* header = (unsigned char*)malloc(524288); 
+    // --- 1. THE MPF & EXIF HUNTER (Reads 1MB of header safely) ---
+    unsigned char* header = (unsigned char*)malloc(1048576); 
     if (header) {
-        int readLen = fread(header, 1, 524288, infile);
+        int readLen = fread(header, 1, 1048576, infile);
         
-        // 1. Manually rip the EXIF data so libjpeg doesn't have to manage state
+        // A. Rip the EXIF safely bypassing libjpeg
         for (int i = 0; i < readLen - 8; i++) {
             if (header[i] == 0xFF && header[i+1] == 0xE1) {
                 if (header[i+4] == 'E' && header[i+5] == 'x' && header[i+6] == 'i' && header[i+7] == 'f') {
                     int len = (header[i+2] << 8) | header[i+3];
-                    int dataLen = len - 2;
-                    if (i + 4 + dataLen <= readLen) {
-                        exifData.assign(header + i + 4, header + i + 4 + dataLen);
+                    if (i + 2 + len <= readLen) {
+                        exifData.assign(header + i + 4, header + i + 2 + len);
                     }
                     break; 
                 }
             }
         }
 
-        // 2. We KNOW soiCount == 2 finds the 1.6MP thumbnail perfectly on your camera
+        // B. Hunt specifically for the 1.6MP MPF Preview if in Proxy Mode
         if (scaleDenom == 4) {
-            int soiCount = 0;
-            for (int i = 0; i < readLen - 1; i++) {
-                if (header[i] == 0xFF && header[i+1] == 0xD8) {
-                    soiCount++;
-                    if (soiCount == 2) {
-                        targetOffset = i;
-                        finalScale = 1; // It's already 1.6MP, do not shrink it further!
-                        break;
+            for (int i = 0; i < readLen - 4; i++) {
+                if (header[i] == 'M' && header[i+1] == 'P' && header[i+2] == 'F' && header[i+3] == 0x00) {
+                    for (int j = i; j < readLen - 1; j++) {
+                        if (header[j] == 0xFF && header[j+1] == 0xD8) {
+                            targetOffset = j;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+            
+            // Backup Hunter: If MPF missing, find the 3rd JPEG marker (1=Main, 2=ExifThumb, 3=Preview)
+            if (targetOffset == 0) {
+                int soiCount = 0;
+                for (int i = 0; i < readLen - 1; i++) {
+                    if (header[i] == 0xFF && header[i+1] == 0xD8) {
+                        soiCount++;
+                        if (soiCount == 3) { targetOffset = i; break; }
                     }
                 }
             }
@@ -104,27 +114,52 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         free(header);
     }
 
-    // Jump straight to the image data we want (Main Image = 0, Thumbnail = targetOffset)
-    fseek(infile, targetOffset, SEEK_SET);
-
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
     
     cinfo_d.err = jpeg_std_error(&jerr_d.pub); 
     jerr_d.pub.error_exit = my_error_exit;
-    if (setjmp(jerr_d.setjmp_buffer)) { 
-        jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; 
-    }
-    
     jpeg_create_decompress(&cinfo_d); 
-    jpeg_stdio_src(&cinfo_d, infile);
-    jpeg_read_header(&cinfo_d, TRUE); 
-    cinfo_d.scale_num = 1;
-    cinfo_d.scale_denom = finalScale; // Will correctly be 1 for Proxy and Ultra, 2 for High
-    cinfo_d.out_color_space = JCS_RGB; 
-    jpeg_start_decompress(&cinfo_d);
 
+    bool decoded = false;
+
+    // --- 2. FAST THUMBNAIL ATTEMPT (With Safety Net) ---
+    if (scaleDenom == 4 && targetOffset > 0) {
+        fseek(infile, targetOffset, SEEK_SET);
+        
+        if (setjmp(jerr_d.setjmp_buffer)) {
+            // IF THUMBNAIL FAILS: Abort decode gently, DO NOT CRASH
+            jpeg_abort_decompress(&cinfo_d); 
+            decoded = false; 
+        } else {
+            jpeg_stdio_src(&cinfo_d, infile);
+            jpeg_read_header(&cinfo_d, TRUE); 
+            cinfo_d.scale_num = 1;
+            cinfo_d.scale_denom = 1; // Thumb is native 1.6MP size
+            cinfo_d.out_color_space = JCS_RGB; 
+            jpeg_start_decompress(&cinfo_d);
+            decoded = true;
+        }
+    }
+
+    // --- 3. SAFETY FALLBACK (If thumbnail failed or High/Ultra mode) ---
+    if (!decoded) {
+        fseek(infile, 0, SEEK_SET);
+        if (setjmp(jerr_d.setjmp_buffer)) { 
+            // FATAL ERROR: Entire file is unreadable
+            jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; 
+        }
+        jpeg_stdio_src(&cinfo_d, infile);
+        jpeg_read_header(&cinfo_d, TRUE); 
+        cinfo_d.scale_num = 1;
+        // If Proxy failed, fallback to scale 4. Otherwise High=2, Ultra=1
+        cinfo_d.scale_denom = (scaleDenom == 4) ? 4 : scaleDenom; 
+        cinfo_d.out_color_space = JCS_RGB; 
+        jpeg_start_decompress(&cinfo_d);
+    }
+
+    // --- 4. ENCODE & INJECT EXIF ---
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
     jerr_c.pub.error_exit = my_error_exit;
     if (setjmp(jerr_c.setjmp_buffer)) { 
@@ -143,11 +178,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     
     jpeg_start_compress(&cinfo_c, TRUE);
 
-    // --- INJECT THE SAVED EXIF ---
+    // Manual EXIF injection (Works on BOTH Thumbnail and Fallback)
     if (!exifData.empty()) {
         jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
     }
 
+    // --- 5. IMAGE PROCESSING LOOP (Your Math) ---
     int map[256]; 
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
     int lutSize2 = nativeLutSize * nativeLutSize;
