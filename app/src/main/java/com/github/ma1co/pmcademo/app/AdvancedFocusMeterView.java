@@ -17,7 +17,6 @@ public class AdvancedFocusMeterView extends View {
     private Paint trackPaint, needlePaint, dofPaint, textPaint;
     private float ratio = 0.5f; 
     private float aperture = 2.8f;
-    private boolean isActive = false;
     private Bitmap bgBitmap;
 
     public AdvancedFocusMeterView(Context context) {
@@ -69,15 +68,14 @@ public class AdvancedFocusMeterView extends View {
         }
     }
 
-    public void update(float currentRatio, float fStop, boolean active) {
+    // Notice we removed the 'boolean active' variable here
+    public void update(float currentRatio, float fStop) {
         this.ratio = currentRatio;
         this.aperture = fStop;
-        this.isActive = active;
-        invalidate();
+        invalidate(); // Force a redraw
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        if (!isActive) return;
         int w = getWidth();
         int h = getHeight();
         

@@ -1562,7 +1562,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (focusMeter != null && cachedIsManualFocus) { 
             runOnUiThread(new Runnable() { 
                 public void run() {
-                    focusMeter.update(ratio, cachedAperture, false); 
+                    // Reverted to true so it actually draws!
+                    focusMeter.update(ratio, cachedAperture, true); 
                 }
             });
         }
