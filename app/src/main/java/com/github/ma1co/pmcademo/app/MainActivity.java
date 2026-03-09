@@ -1303,6 +1303,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (hasSurface && cameraManager != null) {
             cameraManager.open(mSurfaceView.getHolder()); 
         }
+        
+        // --- ADDED FIX: Restart the watcher if the app paused ---
+        if (mScanner != null) {
+            mScanner.start(); 
+        }
+        
         registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)); 
         uiHandler.post(liveUpdater); 
     }
@@ -1315,6 +1321,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (cameraManager != null) {
             cameraManager.close(); 
         }
+        
+        // --- ADDED FIX: Release the watcher so we don't leak memory ---
+        if (mScanner != null) {
+            mScanner.stop(); 
+        }
+        
         if (connectivityManager != null) {
             connectivityManager.stopNetworking(); 
         }

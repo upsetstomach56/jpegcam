@@ -1,12 +1,14 @@
 package com.github.ma1co.pmcademo.app;
 
+import android.os.FileObserver;
 import java.io.File;
 
 public class SonyFileScanner {
+
     private String dcimRoot;
     private ScannerCallback mCallback;
-    private boolean isPolling = false;
-    private long lastNewestFileTime = 0;
+    private FileObserver mObserver;
+    private boolean isRunning = false;
 
     public interface ScannerCallback {
         void onNewPhotoDetected(String filePath);
@@ -14,7 +16,7 @@ public class SonyFileScanner {
     }
 
     public SonyFileScanner(String path, ScannerCallback callback) {
-        // Path comes in as DCIM/100MSDCF. We step up one level to DCIM to catch 101MSDCF, 102MSDCF, etc.
+        // Path comes in as DCIM/100MSDCF. We step up one level to DCIM to catch 101MSDCF, etc.
         File f = new File(path);
         if (f.getParent() != null) {
             this.dcimRoot = f.getParent();
@@ -25,63 +27,62 @@ public class SonyFileScanner {
     }
 
     public void start() {
-        startPolling();
+        if (isRunning) return;
+        
+        File dcimDir = new File(dcimRoot);
+        final File targetFolder = getLatestSonyFolder(dcimDir);
+        
+        if (targetFolder == null) {
+            return;
+        }
+
+        isRunning = true;
+
+        // Hook directly into the Linux kernel to watch for closed files.
+        // FileObserver.CLOSE_WRITE means the BIONZ chip is 100% finished writing to the SD card.
+        mObserver = new FileObserver(targetFolder.getAbsolutePath(), FileObserver.CLOSE_WRITE) {
+            @Override
+            public void onEvent(int event, String path) {
+                if (path != null) {
+                    String upperPath = path.toUpperCase();
+                    // Ignore files we processed ourselves to prevent infinite loops
+                    if (upperPath.endsWith(".JPG") && !upperPath.startsWith("PRCS") && !upperPath.startsWith("FILM_")) {
+                        
+                        if (mCallback != null && mCallback.isReadyToProcess()) {
+                            // Reconstruct the full absolute path
+                            String fullPath = new File(targetFolder, path).getAbsolutePath();
+                            mCallback.onNewPhotoDetected(fullPath);
+                        }
+                    }
+                }
+            }
+        };
+        
+        mObserver.startWatching();
     }
 
     public void stop() {
-        isPolling = false;
+        isRunning = false;
+        if (mObserver != null) {
+            mObserver.stopWatching();
+            mObserver = null;
+        }
     }
 
-    private void startPolling() {
-        isPolling = true;
-        new Thread(new Runnable() {
-            @Override 
-            public void run() {
-                while (isPolling) {
-                    try {
-                        Thread.sleep(500); // Polling every half second is safe for the BIONZ CPU
-                        File dcimDir = new File(dcimRoot);
-                        if (dcimDir.exists() && dcimDir.isDirectory()) {
-                            File newest = null; 
-                            long maxModified = 0;
-                            
-                            // Search all subfolders inside DCIM
-                            File[] subDirs = dcimDir.listFiles();
-                            if (subDirs != null) {
-                                for (File dir : subDirs) {
-                                    if (dir.isDirectory()) {
-                                        File[] files = dir.listFiles();
-                                        if (files != null) {
-                                            for (File f : files) {
-                                                String name = f.getName().toUpperCase();
-                                                // Ignore our own processed files
-                                                if (name.endsWith(".JPG") && !name.startsWith("PRCS") && !name.startsWith("FILM_")) {
-                                                    if (f.lastModified() > maxModified) { 
-                                                        maxModified = f.lastModified(); 
-                                                        newest = f; 
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            if (newest != null) {
-                                if (lastNewestFileTime == 0) { 
-                                    // Set baseline on boot so we don't process old photos
-                                    lastNewestFileTime = maxModified; 
-                                } else if (maxModified > lastNewestFileTime) {
-                                    lastNewestFileTime = maxModified;
-                                    if (mCallback.isReadyToProcess()) {
-                                        mCallback.onNewPhotoDetected(newest.getAbsolutePath());
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {}
+    // Helper method to find the active Sony directory (e.g., 100MSDCF vs 101MSDCF)
+    private File getLatestSonyFolder(File dcim) {
+        if (!dcim.exists() || !dcim.isDirectory()) return null;
+        File latest = null;
+        File[] files = dcim.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory() && f.getName().toUpperCase().endsWith("MSDCF")) {
+                    if (latest == null || f.getName().compareTo(latest.getName()) > 0) {
+                        latest = f;
+                    }
                 }
             }
-        }).start();
+        }
+        return latest;
     }
 }
