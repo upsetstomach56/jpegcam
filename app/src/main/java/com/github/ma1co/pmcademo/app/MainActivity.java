@@ -1690,8 +1690,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (tvPlaybackInfo != null) {
                 tvPlaybackInfo.setText(metaText);
             }
-            
-            String path = file.getAbsolutePath();
 
             // 1. Force the bulletproof downsample (Guarantees < 2MB of RAM usage!)
             BitmapFactory.Options opts = new BitmapFactory.Options();
