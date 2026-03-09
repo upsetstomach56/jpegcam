@@ -30,8 +30,9 @@ public class ImageProcessor {
         new PreloadLutTask().execute(lutPath, lutName);
     }
 
-    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, RTLProfile p) {
-        new ProcessTask(qualityIndex, p, outDirPath).execute(originalPath);
+    // ADDED: int jpegQuality
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p) {
+        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath).execute(originalPath);
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
@@ -44,11 +45,16 @@ public class ImageProcessor {
 
     private class ProcessTask extends AsyncTask<String, Void, String> {
         private int qualityIdx;
+        private int jpegQuality; // ADDED
         private RTLProfile p;
         private String outDir;
 
-        public ProcessTask(int q, RTLProfile p, String out) { 
-            this.qualityIdx = q; this.p = p; this.outDir = out; 
+        // ADDED: int jpegQuality to constructor
+        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out) { 
+            this.qualityIdx = q; 
+            this.jpegQuality = jpegQuality; 
+            this.p = p; 
+            this.outDir = out; 
         }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
@@ -58,7 +64,6 @@ public class ImageProcessor {
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
-                // --- STABILIZATION LOOP ---
                 long lastSize = -1; int timeout = 0;
                 while (timeout < 50) {
                     long currentSize = original.length();
@@ -70,26 +75,15 @@ public class ImageProcessor {
                 File dir = new File(outDir);
                 if (!dir.exists()) dir.mkdirs();
                 
-                // RESTORED: Use original filename
                 File outFile = new File(dir, original.getName());
 
-                // --- FIX: CLOSE THE STREAM TO UNLOCK FOR C++ ---
                 FileOutputStream fos = new FileOutputStream(outFile);
                 fos.write(1);
                 fos.close();
 
-                // 0=Proxy (4), 1=High (2), 2=Ultra (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
-                // Dynamically set JPEG encode quality to save processing/write time!
-                int jpegQuality = 95; // Ultra gets max quality
-                if (scale == 4) {
-                    jpegQuality = 85; // Proxy gets 85 quality (Faster write, visually identical)
-                } else if (scale == 2) {
-                    jpegQuality = 90; // High gets 90 quality
-                }
-
-                // Pass the new dynamic jpegQuality variable to the C++ engine
+                // FIX: Use the user-defined jpegQuality instead of hardcoding it
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, jpegQuality)) {
                     return "SAVED";
                 }

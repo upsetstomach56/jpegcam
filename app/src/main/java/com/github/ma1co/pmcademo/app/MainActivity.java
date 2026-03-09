@@ -94,6 +94,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowFocusMeter = true;
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
+    private int prefJpegQuality = 95; // <-- ADD THIS LINE
     
     private boolean cachedIsManualFocus = false;
     private float cachedAperture = 2.8f;
@@ -205,6 +206,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         prefShowFocusMeter = prefs.getBoolean("focusMeter", true);
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", false);
+        prefJpegQuality = prefs.getInt("jpegQuality", 95);
         
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
@@ -323,7 +325,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (currentSize > 0 && currentSize == lastSize[0]) {
                     Log.d("filmOS", "File stabilized at " + currentSize + " bytes. Firing ImageProcessor!");
                     File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
-                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
+                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile());
                 } else if (retries[0] < 30) { 
                     lastSize[0] = currentSize;
                     retries[0]++;
@@ -471,6 +473,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         editor.putBoolean("focusMeter", prefShowFocusMeter);
         editor.putBoolean("cinemaMattes", prefShowCinemaMattes);
         editor.putBoolean("gridLines", prefShowGridLines);
+        editor.putInt("jpegQuality", prefJpegQuality);
         editor.apply();
 
         triggerLutPreload(); 
@@ -772,6 +775,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 case 4: 
                     prefShowGridLines = !prefShowGridLines; 
                     break;
+                case 5:
+                    // Steps by 5, constrained between 60 and 100
+                    prefJpegQuality = Math.max(60, Math.min(100, prefJpegQuality + (dir * 5)));
+                    break;
             }
         }
         
@@ -1054,17 +1061,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 menuRows[i].setVisibility(View.VISIBLE); 
             }
         } else if (currentPage == 3) {
-            itemCount = 5;
-            String[] qLabels = {"PROXY (1.5M)", "HIGH (6M)", "ULTRA (24M)"};
-            String[] gLabels = {"Global Quality", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid"};
+            itemCount = 6;
+            String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
+            String[] gLabels = {"Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "JPEG Quality"};
             String[] gValues = { 
                 qLabels[recipeManager.getQualityIndex()], 
                 scn, 
                 prefShowFocusMeter ? "ON" : "OFF", 
                 prefShowCinemaMattes ? "ON" : "OFF", 
-                prefShowGridLines ? "ON" : "OFF" 
+                prefShowGridLines ? "ON" : "OFF",
+                String.valueOf(prefJpegQuality)
             };
-            for (int i = 0; i < 5; i++) { 
+            for (int i = 0; i < 6; i++) { 
                 menuLabels[i].setText(gLabels[i]); 
                 menuValues[i].setText(gValues[i]); 
                 menuRows[i].setVisibility(View.VISIBLE); 
@@ -1384,14 +1392,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvReview != null) tvReview.setVisibility(v); 
         
         if (focusMeter != null) {
-            boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
-            focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
-            
-            // FIX: Force the UI to draw the frame immediately when switching to MF,
-            // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
-            if (shouldShow) {
-                focusMeter.update(-1f, cachedAperture, false);
-            }
+            // FIX: Now checks prefShowFocusMeter so it stays hidden if disabled in settings
+            focusMeter.setVisibility((v == View.VISIBLE && cachedIsManualFocus && prefShowFocusMeter) ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -1560,7 +1562,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (focusMeter != null && cachedIsManualFocus) { 
             runOnUiThread(new Runnable() { 
                 public void run() {
-                    focusMeter.update(ratio, cachedAperture, true); 
+                    focusMeter.update(ratio, cachedAperture, false); 
                 }
             });
         }
