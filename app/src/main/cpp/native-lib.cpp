@@ -6,6 +6,7 @@
 #include <setjmp.h>
 #include <math.h>
 #include <sys/time.h>
+#include <arm_neon.h>
 #include "jpeglib.h"
 #include <android/log.h>
 
@@ -77,6 +78,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     std::vector<uint8_t> exifData;
     int targetOffset = 0;
 
+    // --- 1. MPF & EXIF HUNTER ---
     unsigned char* header = (unsigned char*)malloc(1048576); 
     if (header) {
         int readLen = fread(header, 1, 1048576, infile);
@@ -118,8 +120,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         free(header);
     }
 
-    fseek(infile, targetOffset, SEEK_SET);
-
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
@@ -130,6 +130,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     bool decoded = false;
 
+    // --- 2. THUMBNAIL RIPPING & SAFETY NET ---
     if (scaleDenom == 4 && targetOffset > 0) {
         fseek(infile, targetOffset, SEEK_SET);
         if (setjmp(jerr_d.setjmp_buffer)) {
@@ -159,7 +160,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         jpeg_start_decompress(&cinfo_d);
     }
 
-    // --- TELEMETRY LOG ---
     LOGD("Decompressor Ready. Target Dimensions: %d x %d", cinfo_d.output_width, cinfo_d.output_height);
 
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
@@ -180,6 +180,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     
     jpeg_start_compress(&cinfo_c, TRUE);
 
+    // --- 3. EXIF INJECTION ---
     if (!exifData.empty()) {
         jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
     }
@@ -200,6 +201,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JSAMPROW row_pointer[1];
     uint32_t master_seed = 98765;
 
+    // --- 4. PROCESSING LOOP ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
@@ -207,7 +209,68 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         uint32_t seed = master_seed + (abs_y * 1337); 
         int prev_noise = 0; 
 
-        for (int x = 0; x < row_stride; x += 3) {
+        int x = 0;
+
+        // NEON FAST PATH: 8 Pixels (24 bytes) at a time for pure LUT processing
+        if (nativeLutSize > 0 && grain == 0 && vignette == 0 && rollOff == 0) {
+            for (; x <= row_stride - 24; x += 24) {
+                // Load 8 RGB pixels and de-interleave them into R, G, B vectors
+                uint8x8x3_t v_rgb = vld3_u8(&row_buf[x]); 
+                uint8_t r_arr[8], g_arr[8], b_arr[8];
+                
+                vst1_u8(r_arr, v_rgb.val[0]);
+                vst1_u8(g_arr, v_rgb.val[1]);
+                vst1_u8(b_arr, v_rgb.val[2]);
+
+                // Perform tetrahedral lookup on the 8 cached pixels
+                for(int p = 0; p < 8; ++p) {
+                    int r = r_arr[p], g = g_arr[p], b = b_arr[p];
+                    int fX = map[r], fY = map[g], fZ = map[b];
+                    int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
+                    int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
+                    int y1 = (y0 < lutMax) ? y0 + 1 : lutMax;
+                    int z1 = (z0 < lutMax) ? z0 + 1 : lutMax;
+                    int dx = fX & 0x7F, dy_l = fY & 0x7F, dz = fZ & 0x7F;
+                    int v1, v2, w0, w1, w2, w3;
+                    
+                    if (dx >= dy_l) {
+                        if (dy_l >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dx; w1=dx-dy_l; w2=dy_l-dz; w3=dz; } 
+                        else if (dx >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dx; w1=dx-dz; w2=dz-dy_l; w3=dy_l; } 
+                        else { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dx; w2=dx-dy_l; w3=dy_l; }
+                    } else {
+                        if (dz >= dy_l) { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dy_l; w2=dy_l-dx; w3=dx; } 
+                        else if (dz >= dx) { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dy_l; w1=dy_l-dz; w2=dz-dx; w3=dx; } 
+                        else { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dy_l; w1=dy_l-dx; w2=dx-dz; w3=dz; }
+                    }
+                    
+                    const uint8_t* p0 = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
+                    const uint8_t* p1 = &nativeLut[v1*3];
+                    const uint8_t* p2 = &nativeLut[v2*3];
+                    const uint8_t* p3 = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
+                    
+                    int lR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
+                    int lG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
+                    int lB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
+
+                    int outR = r + (((lR - r) * opac_mapped) >> 8);
+                    int outG = g + (((lG - g) * opac_mapped) >> 8);
+                    int outB = b + (((lB - b) * opac_mapped) >> 8);
+
+                    r_arr[p] = (uint8_t)(outR<0?0:outR>255?255:outR);
+                    g_arr[p] = (uint8_t)(outG<0?0:outG>255?255:outG);
+                    b_arr[p] = (uint8_t)(outB<0?0:outB>255?255:outB);
+                }
+
+                // Re-interleave and store 8 pixels back instantly
+                v_rgb.val[0] = vld1_u8(r_arr);
+                v_rgb.val[1] = vld1_u8(g_arr);
+                v_rgb.val[2] = vld1_u8(b_arr);
+                vst3_u8(&row_buf[x], v_rgb);
+            }
+        }
+
+        // SCALAR FALLBACK: Completes the edge pixels, or handles Grain/Vignette/RollOff
+        for (; x < row_stride; x += 3) {
             int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
             int outR = r, outG = g, outB = b;
 
@@ -266,6 +329,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         }
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
     }
+    
     free(row_buf); jpeg_finish_compress(&cinfo_c); jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
     fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); 
