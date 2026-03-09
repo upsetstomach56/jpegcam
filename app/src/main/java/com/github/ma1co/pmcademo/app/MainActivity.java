@@ -1384,8 +1384,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvReview != null) tvReview.setVisibility(v); 
         
         if (focusMeter != null) {
-            // FIX: Now requires BOTH Manual Focus to be active AND the Menu Setting to be ON
-            focusMeter.setVisibility((prefShowFocusMeter && cachedIsManualFocus) ? View.VISIBLE : View.GONE);
+            boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
+            focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
+            
+            // FIX: Force the UI to draw the frame immediately when switching to MF,
+            // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
+            if (shouldShow) {
+                focusMeter.update(-1f, cachedAperture, false);
+            }
         }
     }
 
@@ -1478,7 +1484,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         if (focusMeter != null) {
-            focusMeter.setVisibility(cachedIsManualFocus ? View.VISIBLE : View.GONE);
+            boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
+            focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
+            
+            // FIX: Force the UI to draw the frame immediately when switching to MF,
+            // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
+            if (shouldShow) {
+                focusMeter.update(-1f, cachedAperture, false);
+            }
         }
         
         if (gridLines != null) {
@@ -1719,7 +1732,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         cachedIsManualFocus = "manual".equals(fMode);
         
         if (focusMeter != null) {
-            focusMeter.setVisibility(cachedIsManualFocus ? View.VISIBLE : View.GONE);
+            boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
+            focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
+            
+            // FIX: Force the UI to draw the frame immediately when switching to MF,
+            // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
+            if (shouldShow) {
+                focusMeter.update(-1f, cachedAperture, false);
+            }
         }
     }
 }
