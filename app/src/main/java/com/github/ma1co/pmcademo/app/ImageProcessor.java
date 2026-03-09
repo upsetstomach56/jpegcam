@@ -81,22 +81,19 @@ public class ImageProcessor {
                 fos.write(1);
                 fos.close();
 
-                // 0=Proxy (4), 1=High (2), 2=Ultra (1)
+                // 0=1/4 RES (4), 1=HALF RES (2), 2=FULL RES (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
-                // ADDED: Scale the grain down so it matches the Ultra resolution visually!
-                // (Math.max prevents it from dropping below 1 pixel)
-                int adjustedGrainSize = Math.max(1, Math.round(p.grainSize / (float)scale));
-
-                int jpegQuality = 95; // Ultra gets max quality
+                // Dynamically set JPEG encode quality
+                int jpegQuality = 95; // FULL RES
                 if (scale == 4) {
-                    jpegQuality = 85; // Proxy
+                    jpegQuality = 85; // 1/4 RES
                 } else if (scale == 2) {
-                    jpegQuality = 90; // High
+                    jpegQuality = 90; // HALF RES
                 }
 
-                // FIX: Pass adjustedGrainSize instead of p.grainSize
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, adjustedGrainSize, p.vignette * 20, p.rollOff * 20, jpegQuality)) {
+                // FIX: Reverted to using p.grainSize directly so we don't accidentally force Medium grain!
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, jpegQuality)) {
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }

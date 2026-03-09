@@ -1663,7 +1663,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 return;
             }
             
-            ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+            String path = file.getAbsolutePath();
+            ExifInterface exif = new ExifInterface(path);
             
             String fnum = exif.getAttribute("FNumber");
             String speed = exif.getAttribute("ExposureTime");
@@ -1690,21 +1691,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 tvPlaybackInfo.setText(metaText);
             }
             
-            // --- THE HD MEMORY-SAFE FIX ---
-            String path = file.getAbsolutePath();
-
             // 1. Check dimensions WITHOUT loading into memory
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, opts);
             
-            // 2. Downsample to a safe screen size (~1200px max) to prevent memory crashes
+            // 2. Downsample to a safe screen size (~1200px max)
             opts.inSampleSize = 1;
             while (opts.outWidth / opts.inSampleSize > 1200 || opts.outHeight / opts.inSampleSize > 1200) {
                 opts.inSampleSize *= 2;
             }
             
-            // 3. Actually load the lightweight, memory-safe version
+            // 3. Actually load the lightweight version
             opts.inJustDecodeBounds = false;
             Bitmap raw = BitmapFactory.decodeFile(path, opts);
             
@@ -1712,7 +1710,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 return;
             }
 
-            // 4. Calculate rotation using the EXIF data we loaded earlier
+            // 4. Calculate rotation
             int orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rot = 0; 
             if (orient == ExifInterface.ORIENTATION_ROTATE_90) {
@@ -1730,6 +1728,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
+            
+            // --- CRITICAL MEMORY LEAK FIX ---
+            if (raw != bmp) {
+                raw.recycle(); // Destroy the unrotated duplicate to free up RAM!
+            }
             
             if (playbackImageView != null) {
                 playbackImageView.setImageBitmap(bmp);
