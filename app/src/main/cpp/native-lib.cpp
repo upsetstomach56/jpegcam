@@ -50,7 +50,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
-    jint qualityIdx, jint opacity, jint grain, jint grainSize, 
+    jint scaleDenom, jint opacity, jint grain, jint grainSize, 
     jint vignette, jint rollOff) {
     
     const char *in_file = env->GetStringUTFChars(inPath, NULL); 
@@ -64,19 +64,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         return JNI_FALSE;
     }
 
-    // --- GHOST RIP FOR PROXY (MODE 0) ---
-    if (qualityIdx == 0) {
-        unsigned char header[65536];
-        fread(header, 1, 65536, infile);
-        int soiCount = 0;
-        for (int i = 0; i < 65535; i++) {
-            if (header[i] == 0xFF && header[i+1] == 0xD8) {
-                soiCount++;
-                if (soiCount == 2) { fseek(infile, i, SEEK_SET); break; }
-            }
-        }
-    }
-
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
@@ -88,19 +75,28 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     }
     
     jpeg_create_decompress(&cinfo_d); 
-    jpeg_stdio_src(&cinfo_d, infile);
-    jpeg_read_header(&cinfo_d, TRUE); 
+    
+    // --- EXIF STEP 1: Tell libjpeg to save the APP1 marker (EXIF) ---
+    jpeg_save_markers(&cinfo_d, JPEG_APP0 + 1, 0xFFFF);
 
-    // --- SMART SCALING FIX ---
-    cinfo_d.scale_num = 1;
-    if (qualityIdx == 0) {
-        cinfo_d.scale_denom = 1; // Proxy uses thumb 1:1 (already small)
-    } else if (qualityIdx == 1) {
-        cinfo_d.scale_denom = 2; // High uses 24MP scaled to 6MP
-    } else {
-        cinfo_d.scale_denom = 1; // Ultra uses 24MP 1:1
+    if (scaleDenom == 4) {
+        // Ghost Rip Logic
+        unsigned char header[65536];
+        fread(header, 1, 65536, infile);
+        int soiCount = 0;
+        for (int i = 0; i < 65535; i++) {
+            if (header[i] == 0xFF && header[i+1] == 0xD8) {
+                soiCount++;
+                if (soiCount == 2) { fseek(infile, i, SEEK_SET); break; }
+            }
+        }
     }
 
+    jpeg_stdio_src(&cinfo_d, infile);
+    jpeg_read_header(&cinfo_d, TRUE); 
+    
+    cinfo_d.scale_num = 1;
+    cinfo_d.scale_denom = (scaleDenom == 4) ? 1 : scaleDenom;
     cinfo_d.out_color_space = JCS_RGB; 
     jpeg_start_decompress(&cinfo_d);
 
@@ -119,8 +115,18 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo_c); 
     jpeg_set_quality(&cinfo_c, 95, TRUE); 
+    
+    // --- EXIF STEP 2: Write the saved markers to the new file before starting compression ---
     jpeg_start_compress(&cinfo_c, TRUE);
+    jpeg_saved_marker_ptr marker = cinfo_d.marker_list;
+    while (marker != NULL) {
+        if (marker->marker == (JPEG_APP0 + 1)) { // APP1 is the EXIF segment
+            jpeg_write_marker(&cinfo_c, marker->marker, marker->data, marker->data_length);
+        }
+        marker = marker->next;
+    }
 
+    // PRESERVED MATH
     int map[256]; 
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
     int lutSize2 = nativeLutSize * nativeLutSize;
@@ -183,14 +189,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
             }
             if (grain > 0) {
-                int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-                int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                int n = (fast_rand(&seed) & 0xFF) - 128;
+                int noise = (grainSize == 0) ? n : (grainSize == 1) ? (n + prev_noise) >> 1 : (n + prev_noise * 2) / 3;
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
                 int mask = (lum < 128) ? lum : 255 - lum; 
                 if (lum < 64) mask = (mask * lum) >> 6;
                 int gv = (noise * mask * grain) >> 15; 
                 outR += gv; outG += gv; outB += gv;
-                prev_noise = raw_noise;
+                prev_noise = n;
             }
             row_buf[x] = (unsigned char)(outR<0?0:outR>255?255:outR);
             row_buf[x+1] = (unsigned char)(outG<0?0:outG>255?255:outG);

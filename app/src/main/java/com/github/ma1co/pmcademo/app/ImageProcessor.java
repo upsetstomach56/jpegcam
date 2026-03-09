@@ -56,7 +56,7 @@ public class ImageProcessor {
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
-                // --- THE STABILIZATION LOOP ---
+                // --- YOUR STABILIZATION LOOP ---
                 long lastSize = -1; 
                 int timeout = 0;
                 while (timeout < 50) {
@@ -70,16 +70,19 @@ public class ImageProcessor {
                 File outDir = new File(outDirPath);
                 if (!outDir.exists()) outDir.mkdirs();
                 
-                String outName = "FLM_" + (System.currentTimeMillis() / 1000 % 10000) + ".JPG";
-                File outFile = new File(outDir, outName);
+                // USE ORIGINAL NAME (It's already 8.3)
+                File outFile = new File(outDir, original.getName());
 
-                // --- SONY FUSE PRE-CREATE (Correctly Closed) ---
+                // --- CRITICAL FIX: CLOSE THE STREAM TO UNLOCK FOR C++ ---
                 FileOutputStream fos = new FileOutputStream(outFile);
                 fos.write(1);
                 fos.close();
 
-                // Passing qualityIndex (0, 1, 2) directly to C++ for smart scaling
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), qualityIndex, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                // 0=Proxy(scale 4), 1=High(scale 2), 2=Ultra(scale 1)
+                int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 1 ? 2 : 1);
+
+                // --- YOUR EXACT MULTIPLIERS PRESERVED ---
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
                     mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED";
                 }
