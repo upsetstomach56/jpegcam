@@ -2,9 +2,11 @@ package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.AsyncTask;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -21,7 +23,6 @@ public class ImageProcessor {
     private Context mContext;
     private ProcessorCallback mCallback;
 
-    // We bring Context back so we can trigger the Sony Media Scanner
     public ImageProcessor(Context context, ProcessorCallback callback) {
         this.mContext = context;
         this.mCallback = callback;
@@ -82,20 +83,6 @@ public class ImageProcessor {
 
         @Override
         protected String doInBackground(Void... voids) {
-            File original = new File(inPath);
-            if (!original.exists()) return null;
-
-            // CRITICAL: Wait for the camera hardware to finish writing the file to the SD Card
-            long lastSize = -1;
-            int timeout = 0;
-            while (timeout < 100) {
-                long currentSize = original.length();
-                if (currentSize > 0 && currentSize == lastSize) break;
-                lastSize = currentSize;
-                try { Thread.sleep(50); } catch (Exception e) {}
-                timeout++;
-            }
-
             File dir = new File(outDir);
             if (!dir.exists()) {
                 dir.mkdirs();
@@ -104,20 +91,37 @@ public class ImageProcessor {
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             String finalOutPath = new File(dir, "FILM_" + timeStamp + ".JPG").getAbsolutePath();
 
-            // libjpeg-turbo scale_denom handles downscaling natively during IDCT.
-            // This is lightning fast and lets the C++ layer perfectly preserve the Sony MakerNote EXIF.
+            String fileToProcess = inPath;
             int scaleDenom = 1;
-            if (qualityIndex == 0) { 
-                scaleDenom = 4; // PROXY: ~1.5MP (Skip 3/4 of the IDCT calculation)
-            } else if (qualityIndex == 1) { 
-                scaleDenom = 2; // HIGH: ~6MP (Skip 1/2 of the IDCT calculation)
-            } else { 
-                scaleDenom = 1; // ULTRA: Full 24MP resolution
+            boolean usedThumbnail = false;
+
+            // THUMBNAIL OPTIMIZATION: For Proxy Quality, rip the 2MP JPEG directly from EXIF
+            if (qualityIndex == 0) {
+                try {
+                    ExifInterface exif = new ExifInterface(inPath);
+                    byte[] thumb = exif.getThumbnail();
+                    if (thumb != null && thumb.length > 0) {
+                        File temp = new File(outDir, "temp_proxy.jpg");
+                        FileOutputStream fos = new FileOutputStream(temp);
+                        fos.write(thumb);
+                        fos.close();
+                        fileToProcess = temp.getAbsolutePath();
+                        usedThumbnail = true;
+                    } else {
+                        scaleDenom = 4; // Fallback
+                    }
+                } catch (Exception e) {
+                    scaleDenom = 4;
+                }
+            } else if (qualityIndex == 1) {
+                scaleDenom = 2; // HIGH: 6MP
+            } else {
+                scaleDenom = 1; // ULTRA: 24MP
             }
 
-            // Route straight to C++ NEON layer
+            // Execute Native NEON Image Processing
             boolean success = LutEngine.processImageNative(
-                    inPath,
+                    fileToProcess,
                     finalOutPath,
                     scaleDenom,
                     profile.opacity,
@@ -127,16 +131,37 @@ public class ImageProcessor {
                     profile.rollOff
             );
 
+            if (usedThumbnail) {
+                new File(fileToProcess).delete();
+            }
+
             if (success) {
-                // CRITICAL: Tell the Sony Avindex (Playback Database) that a new file exists
+                // EXIF RESTORATION: Copy metadata back so the Sony Playback Database accepts the file
+                try {
+                    ExifInterface oldExif = new ExifInterface(inPath);
+                    ExifInterface newExif = new ExifInterface(finalOutPath);
+                    String[] tags = {
+                        ExifInterface.TAG_ORIENTATION, 
+                        ExifInterface.TAG_DATETIME, 
+                        ExifInterface.TAG_MAKE, 
+                        ExifInterface.TAG_MODEL, 
+                        "FNumber", 
+                        "ExposureTime", 
+                        "ISOSpeedRatings"
+                    };
+                    for (String t : tags) {
+                        String v = oldExif.getAttribute(t);
+                        if (v != null) newExif.setAttribute(t, v);
+                    }
+                    newExif.saveAttributes();
+                } catch (Exception e) {}
+
+                // Tell the Sony Avindex that a new graded file exists
                 mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(new File(finalOutPath))));
                 return finalOutPath;
             } else {
-                // Failsafe: Clean up 0-byte files if native crash/OOM occurs
-                File failedOut = new File(finalOutPath);
-                if (failedOut.exists()) {
-                    failedOut.delete();
-                }
+                File f = new File(finalOutPath);
+                if (f.exists()) f.delete();
                 return null;
             }
         }
