@@ -15,11 +15,11 @@ import java.util.Map;
 public class LensProfileManager {
     private static final String PREF_NAME = "filmOS_LensProfiles";
     private SharedPreferences prefs;
+    public float currentFocalLength = 50.0f;
+    public float getCurrentFocalLength() { return currentFocalLength; }
     
     // A simple data class to hold our mapped points
     public static class CalPoint {
-        public float currentFocalLength = 50.0f;
-        public float getCurrentFocalLength() { return currentFocalLength; }
         public float ratio;
         public float distance;
         public CalPoint(float r, float d) {

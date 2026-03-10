@@ -4,13 +4,10 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.Typeface;
 import android.view.View;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -18,11 +15,11 @@ import java.util.List;
  * Renders a cinematic distance scale with dynamic DOF calculation and live plot points.
  */
 public class AdvancedFocusMeterView extends View {
-    private Paint trackPaint, needlePaint, dofPaint, markPaint, liveTextPaint, rulerTextPaint;
-    private float ratio = 0.5f; 
-    private float aperture = 2.8f;
-    private float liveDistance = -1.0f; // Fed directly from LensProfileManager math
+    private Paint trackPaint, needlePaint, dofPaint, markPaint, liveTextPaint, rulerTextPaint, bgPaint;
+    
     private LensMath.GaugeState currentState = null;
+    private float currentRatio = 0.5f;
+    private float currentAperture = 2.8f;
     private float currentFocalLength = 50.0f;
     private boolean isCalibrating = false;
     
@@ -31,6 +28,7 @@ public class AdvancedFocusMeterView extends View {
 
     public AdvancedFocusMeterView(Context context) {
         super(context);
+        
         trackPaint = new Paint(); 
         trackPaint.setColor(Color.argb(150, 100, 100, 100)); 
         trackPaint.setStrokeWidth(4);
@@ -57,13 +55,16 @@ public class AdvancedFocusMeterView extends View {
         liveTextPaint.setTextAlign(Paint.Align.CENTER);
         liveTextPaint.setShadowLayer(4, 0, 0, Color.BLACK);
 
-        // Add this to the constructor!
         rulerTextPaint = new Paint();
         rulerTextPaint.setColor(Color.LTGRAY);
         rulerTextPaint.setTextSize(16);
         rulerTextPaint.setAntiAlias(true);
         rulerTextPaint.setTextAlign(Paint.Align.CENTER);
         rulerTextPaint.setTypeface(Typeface.DEFAULT_BOLD);
+
+        bgPaint = new Paint();
+        bgPaint.setColor(Color.DKGRAY);
+        bgPaint.setStrokeWidth(4);
     }
 
     // Feeds the view the UI dots AND the math result
@@ -81,22 +82,6 @@ public class AdvancedFocusMeterView extends View {
             currentState = null;
         }
         invalidate();
-    }
-
-    private String getLiveDistanceString() {
-        if (calPoints.isEmpty()) {
-            return "UNMAPPED LENS";
-        }
-        if (liveDistance >= 999.0f) {
-            return "INFINITY";
-        } else if (liveDistance < 0) {
-            return "--";
-        } else {
-            float totalInches = liveDistance * 39.3701f;
-            int ft = (int) (totalInches / 12);
-            int in = (int) (totalInches % 12);
-            return String.format("%.2fm / %d'%d\"", liveDistance, ft, in);
-        }
     }
 
     @Override
