@@ -100,6 +100,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private LensProfileManager lensManager;
     private int currentLensSlot = 1;
     private boolean isCalibrating = false;
+    private boolean waitingForProfileChoice = false;
+    private boolean isAutoLoading = false;
     private List<LensProfileManager.CalPoint> tempCalPoints = new ArrayList<LensProfileManager.CalPoint>();
     private int calibStep = 0; // 0: ID, 1: Min, 2: 1m, 3: 3m
     private float minDistanceInput = 0.3f;
@@ -334,33 +336,49 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         triggerLutPreload();
     }
     private void processWhenFileReady(final String path) {
-        // --- CALIBRATION IDENTIFICATION SHOT ---
-        if (isCalibrating && calibStep == 0) {
+        // --- SILENT LENS ID INTERCEPTOR ---
+        if (isAutoLoading || (isCalibrating && calibStep == 0)) {
+            String extractedName = "Manual Lens " + currentLensSlot;
             try {
                 ExifInterface exif = new ExifInterface(path);
                 String fl = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH);
-                String fnum = exif.getAttribute("FNumber");
-                
-                if (fl != null && fnum != null) {
-                    try {
-                        String[] flParts = fl.split("/");
-                        int focal = Integer.parseInt(flParts[0]) / Integer.parseInt(flParts[1]);
-                        detectedLensName = focal + "mm f/" + fnum;
-                    } catch (Exception e) {
-                        detectedLensName = "Lens " + currentLensSlot;
-                    }
-                } else {
-                    detectedLensName = "Manual Lens " + currentLensSlot;
+                if (fl != null) {
+                    String[] parts = fl.split("/");
+                    int focal = Integer.parseInt(parts[0]) / Integer.parseInt(parts[1]);
+                    extractedName = focal + "mm Lens";
                 }
-                
-                new File(path).delete(); // Throw the calibration photo away!
-                
-                calibStep = 1; 
-                runOnUiThread(new Runnable() { public void run() { updateCalibrationUI(); } });
-                return; 
             } catch (Exception e) {}
+            
+            new File(path).delete(); // Throw the photo away instantly!
+            final String finalName = extractedName;
+            
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (isAutoLoading) {
+                        isAutoLoading = false;
+                        if (lensManager.loadProfile(finalName)) {
+                            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+                            setHUDVisibility(View.VISIBLE);
+                            updateMainHUD();
+                        } else {
+                            if (tvCalibrationPrompt != null) {
+                                tvCalibrationPrompt.setText("No profile found for:\n" + finalName + "\n\nPress [DOWN] to map it.");
+                            }
+                            waitingForProfileChoice = true; 
+                        }
+                    } else if (isCalibrating && calibStep == 0) {
+                        detectedLensName = finalName;
+                        calibStep = 1;
+                        minDistanceInput = 0.3f;
+                        tempCalPoints.clear();
+                        updateCalibrationUI();
+                    }
+                }
+            });
+            return; // EXIT EARLY! Do NOT process LUTs!
         }
 
+        // --- NORMAL IMAGE GRADING PIPELINE ---
         isProcessing = true; 
         runOnUiThread(new Runnable() { 
             public void run() { 
@@ -576,68 +594,61 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                // INSTANT WIZARD TRIGGER
-                isCalibrating = true;
+                // --- BRING UP THE LENS ROUTER ---
+                waitingForProfileChoice = true;
                 
-                // Start a fresh calibration curve
-                tempCalPoints.clear();
-                calibStep = 1; 
-                minDistanceInput = 0.3f; // Default starting dial value
-                
-                // Hide all main UI, but explicitly keep the focus meter and prompt alive!
                 setHUDVisibility(View.GONE); 
-                if (focusMeter != null) {
-                    focusMeter.setVisibility(View.VISIBLE); 
-                }
+                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setVisibility(View.VISIBLE);
+                    tvCalibrationPrompt.setText("LENS MAPPING\n\n[UP] Auto-Load Saved Lens\n[DOWN] Map New Lens\n[LEFT] Append to Current Map\n[RIGHT] Cancel");
                 }
-                
-                updateCalibrationUI();
             } else {
-                // Toggle HUD visibility
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
             }
         } else {
-            // Menu Interactions
-            if (currentPage == 4) {
-                handleConnectionAction(); 
-            } else { 
-                isMenuEditing = !isMenuEditing; 
-                renderMenu(); 
-            }
+            if (currentPage == 4) handleConnectionAction(); 
+            else { isMenuEditing = !isMenuEditing; renderMenu(); }
         }
     }
 
     @Override 
     public void onUpPressed() { 
-        if (isProcessing) {
-            return;
-        }
+        if (isProcessing) return;
         
-        // --- FINISH CALIBRATION TRAP ---
-        if (isCalibrating && calibStep == 2) {
-            tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
-            lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
-            isCalibrating = false;
-            tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE); // RESTORE HUD!
-            updateMainHUD(); // Force a clean repaint so it doesn't bleed!
+        // --- AUTO-LOAD CHOICE ---
+        if (waitingForProfileChoice) {
+            waitingForProfileChoice = false;
+            isAutoLoading = true;
+            if (tvCalibrationPrompt != null) {
+                tvCalibrationPrompt.setText("AUTO-LOAD LENS\nSnap a photo to read Lens ID...");
+            }
             return;
         }
 
+        // --- FINISH CALIBRATION TRAP ---
+        if (isCalibrating && calibStep == 2) {
+            // Auto-cap Infinity at 100% (1.0f) and save directly to the current slot!
+            tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
+            lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
+            isCalibrating = false;
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+            setHUDVisibility(View.VISIBLE);
+            updateMainHUD();
+            return;
+        }
+        
+        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
-            if (isMenuEditing) {
-                handleMenuChange(1);
-            } else {
+            if (isMenuEditing) handleMenuChange(1);
+            else {
                 menuSelection--;
                 if (menuSelection < 0) {
                     if (currentMainTab == 0 && currentPage == 2) {
-                        currentPage = 1;
-                        menuSelection = 6; // Wrap to bottom of Base page
+                        currentPage = 1; menuSelection = currentItemCount - 1;
                     } else {
-                        menuSelection = currentItemCount - 1; 
+                        menuSelection = currentItemCount - 1;
                     }
                 }
                 renderMenu();
@@ -646,31 +657,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             navigateHomeSpatial(ScalarInput.ISV_KEY_UP);
         }
     }
+
     @Override 
     public void onDownPressed() { 
-        if (isProcessing) {
-            return;
-        }
+        if (isProcessing) return;
         
-        // --- CANCEL CALIBRATION TRAP ---
-        if (isCalibrating) {
-            isCalibrating = false;
-            tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE); // RESTORE HUD!
-            updateMainHUD(); // Force a clean repaint so it doesn't bleed!
+        // --- NEW MAP CHOICE ---
+        if (waitingForProfileChoice) {
+            waitingForProfileChoice = false;
+            isCalibrating = true;
+            calibStep = 0; // Step 0 means waiting for EXIF photo!
+            if (tvCalibrationPrompt != null) {
+                tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
+            }
             return;
         }
         
         // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
-            if (isMenuEditing) {
-                handleMenuChange(-1);
-            } else {
+            if (isMenuEditing) handleMenuChange(-1);
+            else {
                 menuSelection++;
                 if (menuSelection >= currentItemCount) {
                     if (currentMainTab == 0 && currentPage == 1) {
-                        currentPage = 2;
-                        menuSelection = 0; // Wrap to top of Color/Tone page
+                        currentPage = 2; menuSelection = 0;
                     } else {
                         menuSelection = 0;
                     }
@@ -684,41 +694,74 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public void onLeftPressed() { 
-        if (isPlaybackMode) {
-            showPlaybackImage(playbackIndex - 1);
-        } else if (isMenuOpen) {
-            if (isMenuEditing) {
-                handleMenuChange(-1);
+        if (isProcessing) return;
+
+        // --- APPEND TO CURRENT MAP CHOICE ---
+        if (waitingForProfileChoice) {
+            waitingForProfileChoice = false;
+            isCalibrating = true;
+            
+            if (lensManager != null && lensManager.hasActiveProfile()) {
+                // Clone active points, strip infinity cap, and skip to Step 2
+                tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
+                detectedLensName = lensManager.getCurrentLensName();
+                
+                if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
+                    tempCalPoints.remove(tempCalPoints.size() - 1);
+                }
+                
+                calibStep = 2; 
+                minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
+                if (minDistanceInput < 0) minDistanceInput = 1.0f; // Fallback
             } else {
-                currentMainTab = Math.max(0, currentMainTab - 1);
-                if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 3;
-                if (currentMainTab == 2) currentPage = 4;
-                menuSelection = 0; 
-                renderMenu();
+                // Failsafe: start from scratch if no profile
+                tempCalPoints.clear();
+                calibStep = 1;
+                minDistanceInput = 0.3f;
             }
-        } else if (!isProcessing) {
-            navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
+            
+            updateCalibrationUI();
+            return;
+        }
+
+        // --- NORMAL MENU NAVIGATION ---
+        if (isMenuOpen) {
+            if (!isMenuEditing) {
+                currentMainTab--;
+                if (currentMainTab < 0) currentMainTab = 2; 
+                currentPage = 1; menuSelection = 0; renderMenu();
+            }
+        } else {
+            if (mDialMode == DIAL_MODE_REVIEW) navigatePlayback(-1);
+            else navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
         }
     }
     
     @Override 
     public void onRightPressed() { 
-        if (isPlaybackMode) {
-            showPlaybackImage(playbackIndex + 1);
-        } else if (isMenuOpen) {
-            if (isMenuEditing) {
-                handleMenuChange(1);
-            } else {
-                currentMainTab = Math.min(2, currentMainTab + 1);
-                if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 3;
-                if (currentMainTab == 2) currentPage = 4;
-                menuSelection = 0; 
-                renderMenu();
+        if (isProcessing) return;
+
+        // --- UNIVERSAL CANCEL FOR LENS MAPPING ---
+        if (waitingForProfileChoice || isAutoLoading || isCalibrating) {
+            waitingForProfileChoice = false;
+            isAutoLoading = false;
+            isCalibrating = false;
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+            setHUDVisibility(View.VISIBLE);
+            updateMainHUD(); // Force a clean repaint
+            return;
+        }
+
+        // --- NORMAL MENU NAVIGATION ---
+        if (isMenuOpen) {
+            if (!isMenuEditing) {
+                currentMainTab++;
+                if (currentMainTab > 2) currentMainTab = 0;
+                currentPage = 1; menuSelection = 0; renderMenu();
             }
-        } else if (!isProcessing) {
-            navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
+        } else {
+            if (mDialMode == DIAL_MODE_REVIEW) navigatePlayback(1);
+            else navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
         }
     }
     
@@ -1693,6 +1736,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         if (cinemaMattes != null) {
             cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
+        }
+
+        // --- CALIBRATION UI BOUNCER ---
+        // Violently forces the HUD to stay hidden if the hardware loop tries to redraw it while mapping!
+        if (isCalibrating || waitingForProfileChoice || isAutoLoading) {
+            setHUDVisibility(View.GONE);
+            if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.VISIBLE);
         }
     }
 
