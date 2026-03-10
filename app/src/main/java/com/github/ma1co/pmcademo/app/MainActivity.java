@@ -1692,17 +1692,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             
             if (shouldShow) {
-                // If we are calibrating, show the live Temp array. 
-                // If not calibrating, pull the saved profile from the LensManager!
+                // If we are actively calibrating, show the temporary array and "--" for distance
                 if (isCalibrating) {
-                    focusMeter.setCalibrationPoints(tempCalPoints);
-                } else if (lensManager != null) {
-                    // Assuming your LensProfileManager has a way to get the active points...
-                    // Update "getProfile" to whatever your getter method is named!
-                    focusMeter.setCalibrationPoints(lensManager.getProfile("Lens " + currentLensSlot));
+                    focusMeter.update(cachedFocusRatio, cachedAperture, -1.0f, tempCalPoints);
+                } 
+                // If normal shooting, pull the math and saved points from LensManager
+                else if (lensManager != null) {
+                    float currentDist = lensManager.getDistanceForRatio(cachedFocusRatio);
+                    focusMeter.update(cachedFocusRatio, cachedAperture, currentDist, lensManager.getCurrentPoints());
                 }
-                
-                focusMeter.update(cachedFocusRatio, cachedAperture);
             }
         }
         
@@ -1773,7 +1771,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             runOnUiThread(new Runnable() { 
                 public void run() {
                     cachedFocusRatio = ratio; // <-- UPDATE THE CACHE
-                    focusMeter.update(cachedFocusRatio, cachedAperture); 
+                    updateMainHUD(); // Calls the new 4-parameter update safely!
                 }
             });
         }
@@ -1960,7 +1958,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         // --- PHASE 1: LENS DISCOVERY DUMP ---
-        // This writes all hardware parameters to a text file on your SD card so we can find the Lens ID
         try {
             File dumpFile = new File(Environment.getExternalStorageDirectory(), "GRADED/dump.txt");
             if (!dumpFile.exists()) {
@@ -1980,15 +1977,5 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         String fMode = c.getParameters().getFocusMode();
         cachedIsManualFocus = "manual".equals(fMode);
-        
-        if (focusMeter != null) {
-            boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
-            focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
-            
-            // Change focusMeter.update(0.5f, cachedAperture); to this:
-            if (shouldShow) {
-                focusMeter.update(cachedFocusRatio, cachedAperture);
-            }
-        }
     }
 }
