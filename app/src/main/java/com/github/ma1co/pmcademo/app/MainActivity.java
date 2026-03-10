@@ -724,16 +724,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        // --- NORMAL MENU NAVIGATION ---
-        if (isMenuOpen) {
-            if (!isMenuEditing) {
-                currentMainTab--;
-                if (currentMainTab < 0) currentMainTab = 2; 
-                currentPage = 1; menuSelection = 0; renderMenu();
+        // --- ORIGINAL MENU & PLAYBACK NAVIGATION ---
+        if (isPlaybackMode) {
+            showPlaybackImage(playbackIndex - 1);
+        } else if (isMenuOpen) {
+            if (isMenuEditing) {
+                handleMenuChange(-1);
+            } else {
+                currentMainTab = Math.max(0, currentMainTab - 1);
+                if (currentMainTab == 0) currentPage = 1;
+                if (currentMainTab == 1) currentPage = 3;
+                if (currentMainTab == 2) currentPage = 4;
+                menuSelection = 0; 
+                renderMenu();
             }
         } else {
-            if (mDialMode == DIAL_MODE_REVIEW) navigatePlayback(-1);
-            else navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
+            navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
         }
     }
     
@@ -752,16 +758,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        // --- NORMAL MENU NAVIGATION ---
-        if (isMenuOpen) {
-            if (!isMenuEditing) {
-                currentMainTab++;
-                if (currentMainTab > 2) currentMainTab = 0;
-                currentPage = 1; menuSelection = 0; renderMenu();
+        // --- ORIGINAL MENU & PLAYBACK NAVIGATION ---
+        if (isPlaybackMode) {
+            showPlaybackImage(playbackIndex + 1);
+        } else if (isMenuOpen) {
+            if (isMenuEditing) {
+                handleMenuChange(1);
+            } else {
+                currentMainTab = Math.min(2, currentMainTab + 1);
+                if (currentMainTab == 0) currentPage = 1;
+                if (currentMainTab == 1) currentPage = 3;
+                if (currentMainTab == 2) currentPage = 4;
+                menuSelection = 0; 
+                renderMenu();
             }
         } else {
-            if (mDialMode == DIAL_MODE_REVIEW) navigatePlayback(1);
-            else navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
+            navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
         }
     }
     
