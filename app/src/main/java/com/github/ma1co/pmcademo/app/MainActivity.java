@@ -348,11 +348,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         final File f = new File(path);
         
         // --- GHOST EVENT KILLER ---
-        // Android's FileObserver fires twice. If the first event deleted this file, abort instantly!
         if (!f.exists()) return; 
+        
+        // If we grabbed an EXIF photo in the last 2 seconds, ignore all double-fire events!
+        if (System.currentTimeMillis() - lastExifGrabTime < 2000) {
+            return;
+        }
 
         // --- SILENT LENS ID INTERCEPTOR ---
         if (isAutoLoading || (isCalibrating && calibStep == 0)) {
+            lastExifGrabTime = System.currentTimeMillis(); // Lock out the RTL engine for 2 seconds!
+            
             String extractedName = "Manual Lens " + currentLensSlot;
             float extractedFocal = 50.0f; 
             
@@ -367,7 +373,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             } catch (Exception e) {}
             
-            f.delete(); // Throw the photo away!
+            f.delete(); // Throw the photo away
             final String finalName = extractedName;
             final float finalFocal = extractedFocal;
             
@@ -399,7 +405,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     }
                 }
             });
-            return; // EXIT EARLY! Do NOT process LUTs!
+            return; 
         }
 
         // --- NORMAL IMAGE GRADING PIPELINE ---
@@ -421,7 +427,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override
             public void run() {
                 if (!f.exists()) {
-                    // Failsafe: if file was deleted mid-check, silently abort.
                     isProcessing = false;
                     updateMainHUD();
                     return;
@@ -1674,29 +1679,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
         }
         
-        // 1. The Compact Header
-        String html = "<font color='#FFFFFF'><small><b>MAPPING: " + detectedLensName + " (PTS: " + tempCalPoints.size() + ")</b></small><br>";
+        String header = "<font color='#FFFFFF'><b>[ MAPPING: " + detectedLensName + " | POINTS LOGGED: " + tempCalPoints.size() + " ]</b></font><br>";
         
-        // 2. The Inline Instructions & Slider
+        // Color coding for clear user direction!
+        String wheelText = "<font color='#00FFFF'><b>rear scroll wheel</b></font>"; // Cyan
+        String sliderHtml = "<font color='#E6320F'><big><b>◄ " + distStr + " ►</b></big></font>"; // filmOS Orange
+        String enterBtn = "<font color='#00FF00'><b>[ENTER]</b></font>"; // Green
+        String upBtn = "<font color='#00FF00'><b>[UP]</b></font>"; // Green
+        
+        String instructions = "";
+        
         if (calibStep == 1) {
-            html += "STEP 1: MIN FOCUS &nbsp;&nbsp; <font color='#E6320F'><b>◄ " + distStr + " ►</b></font> &nbsp;&nbsp; [ENTER] lock";
+            instructions = "<font color='#FFFFFF'><small>STEP 1: Turn lens ring to hard stop (MIN FOCUS).</small><br>";
+            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
+            instructions += "<small>Press " + enterBtn + " to lock min point.</small></font>";
         } else if (calibStep == 2) {
-            html += "STEP 2: ADD POINT &nbsp;&nbsp; <font color='#E6320F'><b>◄ " + distStr + " ►</b></font> &nbsp;&nbsp; [ENTER] lock &bull; [UP] save";
+            instructions = "<font color='#FFFFFF'><small>STEP 2: Focus on next object.</small><br>";
+            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
+            instructions += "<small>Press " + enterBtn + " to log point, or " + upBtn + " to Save & Finish.</small></font>";
         }
         
         if (tvCalibrationPrompt != null) {
             try {
-                // Push it to the absolute top of the screen
+                // Keep it pinned to the top of the screen out of the way
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tvCalibrationPrompt.getLayoutParams();
                 lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
                 lp.topMargin = 10; 
                 tvCalibrationPrompt.setLayoutParams(lp);
             } catch (Exception e) { }
             
-            // Tight padding, dark background
-            tvCalibrationPrompt.setBackgroundColor(Color.argb(180, 0, 0, 0)); 
-            tvCalibrationPrompt.setPadding(20, 10, 20, 10); 
-            tvCalibrationPrompt.setText(android.text.Html.fromHtml(html));
+            // Dark background so it is perfectly readable
+            tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15)); 
+            tvCalibrationPrompt.setPadding(25, 15, 25, 15); 
+            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + instructions));
         }
     }
     
