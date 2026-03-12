@@ -1629,33 +1629,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String instructions = "";
         
         if (calibStep == 0) {
-            String sliderHtml = "<font color='#E6320F'><big><b>◄ " + (int)detectedFocalLength + "mm ►</b></big></font>";
+            // Step 0 uses a Focal Length (mm) slider
+            String mmSlider = "<font color='#E6320F'><big><b>◄ " + (int)detectedFocalLength + "mm ►</b></big></font>";
             instructions = "<font color='#FFFFFF'><small>STEP 0: Manual Lens Detected.</small><br>";
-            instructions += "<small>Use " + wheelText + " or D-Pad to set Focal Length: </small> " + sliderHtml + "<br>";
+            instructions += "<small>Use " + wheelText + " or D-Pad to set Focal Length: </small> " + mmSlider + "<br>";
             instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
-        } else if (calibStep == 1) {
-            instructions = "<font color='#FFFFFF'><small>STEP 1: Turn lens ring to hard stop (MIN FOCUS).</small><br>";
-            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
-            instructions += "<small>Press " + enterBtn + " to lock min point.</small></font>";
-        } else if (calibStep == 2) {
-            instructions = "<font color='#FFFFFF'><small>STEP 2: Focus on next object.</small><br>";
-            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
-            instructions += "<small>Press " + enterBtn + " to log point, or " + upBtn + " to Save & Finish.</small></font>";
+        } else {
+            // Steps 1 and 2 use a Distance (m) slider
+            String distSlider = "<font color='#E6320F'><big><b>◄ " + String.format("%.1f", minDistanceInput) + "m ►</b></big></font>";
+            
+            if (calibStep == 1) {
+                instructions = "<font color='#FFFFFF'><small>STEP 1: Focus lens to its closest minimum distance.</small><br>";
+                instructions += "<small>Use " + wheelText + " to dial distance: </small> " + distSlider + "<br>";
+                instructions += "<small>Press " + enterBtn + " to log point.</small></font>";
+            } else if (calibStep == 2) {
+                instructions = "<font color='#FFFFFF'><small>STEP 2: Focus lens to next printed distance mark.</small><br>";
+                instructions += "<small>Use " + wheelText + " to dial distance: </small> " + distSlider + "<br>";
+                instructions += "<small>Press " + enterBtn + " to log point, or " + upBtn + " to finish.</small></font>";
+            }
         }
         
         if (tvCalibrationPrompt != null) {
-            try {
-                // Keep it pinned to the top of the screen out of the way
-                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tvCalibrationPrompt.getLayoutParams();
-                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                lp.topMargin = 10; 
-                tvCalibrationPrompt.setLayoutParams(lp);
-            } catch (Exception e) { }
-            
-            // Dark background so it is perfectly readable
-            tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15)); 
-            tvCalibrationPrompt.setPadding(25, 15, 25, 15); 
-            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + instructions));
+            tvCalibrationPrompt.setVisibility(View.VISIBLE);
+            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + "<br>" + instructions));
         }
     }
     
