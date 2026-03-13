@@ -454,10 +454,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isCalibrating && calibStep == 10) {
-            calibStep = 1; 
-            minDistanceInput = 0.3f;
-            tempCalPoints.clear();
-            updateCalibrationUI();
+            if (!isNativeLensAttached) {
+                // Manual Lens: Skip physical mapping entirely and auto-save!
+                tempCalPoints = lensManager.generateManualDummyProfile();
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
+                
+                availableLenses = lensManager.getAvailableLenses();
+                String newFilename = (int)detectedFocalLength + "mm" + (int)(detectedMaxAperture * 10) + ".lens";
+                currentLensIndex = availableLenses.indexOf(newFilename);
+                if (currentLensIndex == -1) currentLensIndex = 0;
+                lensManager.loadProfileFromFile(newFilename);
+                
+                isCalibrating = false;
+                if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+                setHUDVisibility(View.VISIBLE);
+                updateMainHUD();
+            } else {
+                // Native Lens: Proceed to Step 1 distance mapping
+                calibStep = 1; 
+                minDistanceInput = 0.3f;
+                tempCalPoints.clear();
+                updateCalibrationUI();
+            }
             return;
         }
         

@@ -60,6 +60,15 @@ public class LensProfileManager {
         return new File(Environment.getExternalStorageDirectory(), "LENSES");
     }
 
+    // --- NEW: Generates a dummy math profile for manual lenses ---
+    public List<CalPoint> generateManualDummyProfile() {
+        List<CalPoint> ghostPoints = new ArrayList<CalPoint>();
+        ghostPoints.add(new CalPoint(0.0f, 0.3f)); // Virtual Near
+        ghostPoints.add(new CalPoint(0.5f, 2.0f)); // Virtual Mid
+        ghostPoints.add(new CalPoint(1.0f, 999.0f)); // Virtual Infinity
+        return ghostPoints;
+    }
+    
     public List<String> getAvailableLenses() {
         List<String> lenses = new ArrayList<String>();
         if (lensesDir != null && lensesDir.exists() && lensesDir.listFiles() != null) {
