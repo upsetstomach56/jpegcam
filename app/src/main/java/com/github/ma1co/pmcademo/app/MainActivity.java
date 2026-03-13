@@ -112,7 +112,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private float hardwareFocalLength = 0.0f;
     private boolean isNativeLensAttached = false;
     
-    // --- NEW: PHASE 2 VIRTUAL VARS FOR MANUAL DOF ---
+    // --- PHASE 2 VIRTUAL VARS FOR MANUAL DOF ---
     private float virtualAperture = 2.8f;
     private float virtualFocusRatio = 0.5f;
     
@@ -446,21 +446,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         updateMainHUD();
     }
 
+    // --- NEW: Dynamically detects Circle of Confusion from physical hardware model ---
+    private float getCircleOfConfusion() {
+        String model = android.os.Build.MODEL.toUpperCase();
+        // Known Full Frame camera strings (A7, A9, A1, RX1, A99II, etc.)
+        if (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1") || model.contains("DSC-RX1") || model.contains("ILCA-99")) {
+            return 0.030f; // Full Frame Sensor CoC
+        }
+        // Default to standard APS-C (A6000 series, NEX, A5000, etc.)
+        return 0.020f; 
+    }
+
     @Override 
     public void onEnterPressed() {
         if (isPlaybackMode) { exitPlayback(); return; }
         if (isProcessing) return;
         
+        // Step 0A (Focal Length) -> go to Step 0B (Aperture)
         if (isCalibrating && calibStep == 0) {
             calibStep = 10; 
             updateCalibrationUI();
             return;
         }
 
+        // Step 0B (Aperture) -> Split based on lens type!
         if (isCalibrating && calibStep == 10) {
             if (!isNativeLensAttached) {
-                // MANUAL LENS: Auto-save ghost profile and equip!
-                tempCalPoints = lensManager.generateManualDummyProfile(detectedFocalLength);
+                // MANUAL LENS: Generate perfect curve based on actual hardware sensor!
+                tempCalPoints = lensManager.generateManualDummyProfile(detectedFocalLength, detectedMaxAperture, getCircleOfConfusion());
                 lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, true); 
                 
                 availableLenses = lensManager.getAvailableLenses();
@@ -479,6 +492,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 setHUDVisibility(View.VISIBLE);
                 updateMainHUD();
             } else {
+                // ELECTRONIC LENS: Proceed to Distance Mapping (Step 1)
                 calibStep = 1; 
                 minDistanceInput = 0.3f;
                 updateCalibrationUI();
@@ -486,6 +500,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // Step 1 -> Step 2 (Electronic Only)
         if (isCalibrating && isNativeLensAttached) {
             if (calibStep == 1) {
                 tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
@@ -644,11 +659,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return; 
         }
         
-        // --- PHASE 2: MANUAL DOF DISTANCE SLIDER (LEFT) ---
         if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
             updateMainHUD();
-            return; // Consume it so we don't change Dial Modes!
+            return; 
         }
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex - 1); } 
@@ -691,11 +705,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
-        // --- PHASE 2: MANUAL DOF DISTANCE SLIDER (RIGHT) ---
         if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
             updateMainHUD();
-            return; // Consume it so we don't change Dial Modes!
+            return; 
         }
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex + 1); } 
@@ -856,7 +869,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
     
-    // --- PHASE 2: MANUAL DOF APERTURE SLIDER ---
     private void adjustVirtualAperture(int direction) {
         float[] stops = {1.0f, 1.2f, 1.4f, 1.8f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11.0f, 16.0f, 22.0f};
         int currentIndex = 0;
@@ -876,7 +888,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         virtualAperture = stops[currentIndex];
         
-        // Clamp to Max Aperture of the profile!
         if (lensManager != null && virtualAperture < lensManager.currentMaxAperture) {
             virtualAperture = lensManager.currentMaxAperture;
         }
@@ -905,7 +916,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (d > 0) cx.incrementShutterSpeed(); else cx.decrementShutterSpeed(); 
         }
         else if (mDialMode == DIAL_MODE_APERTURE) { 
-            // --- NEW: Intercept for Virtual Aperture ---
             if (lensManager != null && lensManager.isCurrentProfileManual()) {
                 adjustVirtualAperture(d);
             } else {
@@ -980,7 +990,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (!lensFile.equals("unmapped")) {
                     currentLensIndex = availableLenses.indexOf(lensFile);
                     lensManager.loadProfileFromFile(lensFile);
-                    // --- Reset Virtual Vars when swapping to a new Manual Lens ---
                     if (lensManager.isCurrentProfileManual()) {
                         virtualAperture = lensManager.currentMaxAperture;
                         virtualFocusRatio = 0.5f;
@@ -1415,12 +1424,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (calibStep == 0) {
             String mmSlider = "<font color='#E6320F'><big><b>◄ " + (int)detectedFocalLength + "mm ►</b></big></font>";
             instructions = "<font color='#FFFFFF'><small>STEP 0A: Lens Detected.</small><br>";
-            instructions += "<small>Use " + wheelText + " or D-Pad to set Focal Length: </small> " + mmSlider + "<br>";
+            instructions += "<small>Use [LEFT] / [RIGHT] to set Focal Length: </small> " + mmSlider + "<br>";
             instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
         } else if (calibStep == 10) {
             String apSlider = "<font color='#E6320F'><big><b>◄ f/" + String.format("%.1f", detectedMaxAperture) + " ►</b></big></font>";
             instructions = "<font color='#FFFFFF'><small>STEP 0B: Set Max Aperture for Lens ID.</small><br>";
-            instructions += "<small>Use " + wheelText + " or D-Pad to set Max Aperture: </small> " + apSlider + "<br>";
+            instructions += "<small>Use [LEFT] / [RIGHT] to set Max Aperture: </small> " + apSlider + "<br>";
             instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
         } else if (calibStep == 1) {
             instructions = "<font color='#FFFFFF'><small>STEP 1: Turn lens ring to hard stop (MIN FOCUS).</small><br>";
@@ -1472,7 +1481,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         cachedAperture = pm.getAperture() / 100.0f;
         Pair<Integer, Integer> ss = pm.getShutterSpeed(); 
         
-        // --- PHASE 2: HUD shows Virtual Aperture if Manual Lens is active! ---
         if (tvValAperture != null) {
             if (lensManager != null && lensManager.isCurrentProfileManual()) {
                 tvValAperture.setText(String.format("f%.1f", virtualAperture)); 
@@ -1511,7 +1519,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             if (shouldShow) {
-                // --- PHASE 2: Feed the virtual math to the meter! ---
                 float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
                 List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                 

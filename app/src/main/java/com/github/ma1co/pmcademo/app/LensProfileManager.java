@@ -31,8 +31,11 @@ public class LensProfileManager {
     private List<CalPoint> activePoints = new ArrayList<CalPoint>();
     private boolean hasActiveProfile = false;
 
-    public LensProfileManager(Context context) {}
+    public LensProfileManager(Context context) {
+        // Constructor left intentionally blank to avoid stale SD card references on boot.
+    }
     
+    // Dynamically fetches the root exactly like GRADED does
     private File getLensesDir() {
         File dir = new File(Environment.getExternalStorageDirectory(), "LENSES");
         if (!dir.exists()) {
@@ -69,23 +72,23 @@ public class LensProfileManager {
         return filename.replace(".txt", "").toUpperCase();
     }
 
-    // --- UPGRADED: Physics-Based Cinematic Focus Curve ---
-    public List<CalPoint> generateManualDummyProfile(float focalLength) {
+    // --- UPGRADED: Dynamic Curve Generator utilizing Dynamic CoC from MainActivity ---
+    public List<CalPoint> generateManualDummyProfile(float focalLength, float maxAperture, float circleOfConfusion) {
         List<CalPoint> ghostPoints = new ArrayList<CalPoint>();
         
         // 1. Calculate realistic Minimum Focus Distance (~focalLength / 100)
         float minDist = Math.max(0.1f, focalLength / 100.0f);
         
-        // 2. Calculate realistic Infinity Hard-Stop (Hyperfocal at f/2.8 with CoC 0.03mm)
+        // 2. Calculate Infinity Hard-Stop limit dynamically based on the camera's actual sensor
         // H = (f^2) / (N * CoC) mm -> convert to meters
-        float maxDist = (focalLength * focalLength) / (2.8f * 0.03f * 1000.0f);
+        float safeAperture = Math.max(0.5f, maxAperture); 
+        float maxDist = (focalLength * focalLength) / (safeAperture * circleOfConfusion * 1000.0f);
         
         // 3. Generate 10 exponential points to simulate a physical lens barrel
         for (int i = 0; i < 10; i++) {
             float ratio = i / 10.0f; // 0.0 to 0.9
             
-            // Map the 0.0-0.9 range to an exponential distance curve (Cubic)
-            // This forces fine micro-adjustments up close, and rapid jumps far away
+            // Cubic curve forces fine micro-adjustments up close, and rapid jumps far away
             float normalizedProgress = i / 9.0f; 
             float curve = normalizedProgress * normalizedProgress * normalizedProgress;
             
