@@ -15,8 +15,8 @@ import java.util.List;
 public class LensProfileManager {
 
     public static class CalPoint {
-        public final float ratio;     // Motor position (0.0 to 1.0)
-        public final float distance;  // Physical distance in meters
+        public final float ratio;     
+        public final float distance;  
 
         public CalPoint(float ratio, float distance) {
             this.ratio = ratio;
@@ -34,37 +34,53 @@ public class LensProfileManager {
     private boolean hasActiveProfile = false;
 
     public LensProfileManager(Context context) {
-        lensesDir = new File(Environment.getExternalStorageDirectory(), "LENSES");
-        if (!lensesDir.exists()) {
-            lensesDir.mkdirs();
-        }
+        lensesDir = findBestLensesDirectory();
     }
 
-    /**
-     * Scans the /sdcard/LENSES/ folder and returns a list of all .lens files
-     */
+    // --- NEW: Aggressive SD Card Locator ---
+    private File findBestLensesDirectory() {
+        String[] possibleRoots = { 
+            Environment.getExternalStorageDirectory().getAbsolutePath(), 
+            "/mnt/sdcard", 
+            "/storage/sdcard0", 
+            "/sdcard" 
+        };
+        
+        for (String r : possibleRoots) {
+            File testDir = new File(r, "LENSES");
+            if (!testDir.exists()) {
+                if (testDir.mkdirs()) {
+                    Log.d("filmOS_Lens", "Created LENSES directory at: " + testDir.getAbsolutePath());
+                    return testDir;
+                }
+            } else if (testDir.isDirectory()) {
+                return testDir;
+            }
+        }
+        return new File(Environment.getExternalStorageDirectory(), "LENSES");
+    }
+
     public List<String> getAvailableLenses() {
         List<String> lenses = new ArrayList<String>();
-        if (lensesDir.exists() && lensesDir.listFiles() != null) {
+        if (lensesDir != null && lensesDir.exists() && lensesDir.listFiles() != null) {
             for (File f : lensesDir.listFiles()) {
                 if (f.getName().toLowerCase().endsWith(".lens")) {
                     lenses.add(f.getName());
                 }
             }
         }
-        Collections.sort(lenses); // Keep them alphabetical
+        Collections.sort(lenses); 
         return lenses;
     }
 
-    /**
-     * Saves a mapped lens profile directly to the SD card.
-     * Auto-generates the filename: e.g. 25mm, f/1.8 -> "25mm18.lens"
-     */
     public void saveProfileToFile(float focalLength, float maxAperture, List<CalPoint> points) {
-        if (!lensesDir.exists()) lensesDir.mkdirs();
+        if (lensesDir == null || (!lensesDir.exists() && !lensesDir.mkdirs())) {
+            Log.e("filmOS_Lens", "CRITICAL: Could not access LENSES directory to save.");
+            return;
+        }
 
         int focalInt = (int) focalLength;
-        int apInt = (int) (maxAperture * 10); // 1.8 -> 18
+        int apInt = (int) (maxAperture * 10); 
         String filename = focalInt + "mm" + apInt + ".lens";
         
         File outFile = new File(lensesDir, filename);
@@ -83,16 +99,14 @@ public class LensProfileManager {
             
             writer.flush();
             writer.close();
-            Log.d("filmOS_Lens", "Saved lens profile to SD Card: " + filename);
+            Log.d("filmOS_Lens", "Saved lens profile to SD Card: " + outFile.getAbsolutePath());
         } catch (Exception e) {
             Log.e("filmOS_Lens", "Failed to save lens file: " + e.getMessage());
         }
     }
 
-    /**
-     * Loads a specific .lens file from the SD card into active memory.
-     */
     public void loadProfileFromFile(String filename) {
+        if (lensesDir == null) return;
         File inFile = new File(lensesDir, filename);
         if (!inFile.exists()) {
             clearCurrentProfile();
@@ -160,7 +174,6 @@ public class LensProfileManager {
         return currentLensName;
     }
 
-    // Direct interpolation to get distance at a specific ratio during Append
     public float getDistanceForRatio(float targetRatio) {
         if (activePoints.size() < 2) return -1f;
         

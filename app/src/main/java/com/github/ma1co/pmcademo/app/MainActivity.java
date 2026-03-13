@@ -499,25 +499,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isProcessing) return;
         if (waitingForProfileChoice) return;
 
-        if (isCalibrating && calibStep == 2) {
-            tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
-            
-            // Save to SD card with clean name
-            lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
-            
-            // Refresh available lenses and load the one we just made
-            availableLenses = lensManager.getAvailableLenses();
-            String newFilename = (int)detectedFocalLength + "mm" + (int)(detectedMaxAperture * 10) + ".lens";
-            currentLensIndex = availableLenses.indexOf(newFilename);
-            if (currentLensIndex == -1) currentLensIndex = 0;
-            lensManager.loadProfileFromFile(newFilename);
-            
-            isCalibrating = false;
-            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE);
-            updateMainHUD();
-            return;
+        // --- TIGHTENED CALIBRATION TRAP ---
+        if (isCalibrating) {
+            if (calibStep == 2) {
+                tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
+                
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
+                
+                availableLenses = lensManager.getAvailableLenses();
+                String newFilename = (int)detectedFocalLength + "mm" + (int)(detectedMaxAperture * 10) + ".lens";
+                currentLensIndex = availableLenses.indexOf(newFilename);
+                if (currentLensIndex == -1) currentLensIndex = 0;
+                lensManager.loadProfileFromFile(newFilename);
+                
+                isCalibrating = false;
+                if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+                setHUDVisibility(View.VISIBLE);
+                updateMainHUD();
+            }
+            return; // We MUST return here so the D-Pad doesn't trigger the menu while calibrating!
         }
+        // ----------------------------------
+        
+        if (isMenuOpen) {
+            if (isMenuEditing) handleMenuChange(1);
+            else {
+                menuSelection--;
+                if (menuSelection < 0) {
+                    if (currentMainTab == 0 && currentPage == 2) { currentPage = 1; menuSelection = currentItemCount - 1; } 
+                    else { menuSelection = currentItemCount - 1; }
+                }
+                renderMenu();
+            }
+        } else {
+            navigateHomeSpatial(ScalarInput.ISV_KEY_UP);
+        }
+    }
         
         if (isMenuOpen) {
             if (isMenuEditing) handleMenuChange(1);
