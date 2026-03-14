@@ -380,7 +380,43 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override 
-    public void onDeletePressed() { finish(); }
+    public void onDeletePressed() { 
+        // --- TEMPORARY POC: RACK FOCUS STRESS TEST ---
+        if (cameraManager != null && cameraManager.getCamera() != null && isNativeLensAttached) {
+            if (tvTopStatus != null) {
+                tvTopStatus.setText("POC: RACKING FOCUS...");
+                tvTopStatus.setTextColor(Color.CYAN);
+                tvTopStatus.setVisibility(View.VISIBLE);
+            }
+            
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Camera c = cameraManager.getCamera();
+                    // Fire 50 micro-steps to the focus motor (approx 2.5 seconds)
+                    for (int i = 0; i < 50; i++) {
+                        try {
+                            Camera.Parameters p = c.getParameters();
+                            // Sony's hidden API keys for manual focus drive
+                            // Trying both common variants to ensure the motor catches it
+                            p.set("focus-drive", "FarStep"); 
+                            c.setParameters(p);
+                            Thread.sleep(50); // Send command every 50ms (20fps)
+                        } catch (Exception e) {}
+                    }
+                    
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            updateMainHUD();
+                        }
+                    });
+                }
+            }).start();
+            return;
+        }
+        
+        finish(); 
+    }
 
     @Override 
     public void onMenuPressed() {
