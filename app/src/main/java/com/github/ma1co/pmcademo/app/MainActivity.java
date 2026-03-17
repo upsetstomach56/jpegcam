@@ -560,7 +560,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 updateMainHUD(); 
             }
         } else {
-            if (currentPage == 6) handleConnectionAction(); 
+            if (currentPage == 7) handleConnectionAction(); 
             else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
                 // ARCADE NAMING TOGGLE
                 isNamingMode = !isNamingMode;
@@ -615,6 +615,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         if (currentPage == 1) menuSelection = 7;
                         else if (currentPage == 2) menuSelection = 6;
                         else if (currentPage == 3) menuSelection = 5;
+                        else if (currentPage == 4) menuSelection = 4; // Optics page has 5 items (0 to 4)
                     } else { 
                         menuSelection = currentItemCount - 1; 
                     }
@@ -659,7 +660,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 menuSelection++;
                 if (menuSelection >= currentItemCount) {
-                    if (currentMainTab == 0 && currentPage < 4) { 
+                    if (currentMainTab == 0 && currentPage < 5) { // Updated to allow 5 pages in Recipes Tab
                         currentPage++; 
                         menuSelection = 0; 
                     } else { 
@@ -731,9 +732,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 currentMainTab = Math.max(0, currentMainTab - 1);
                 if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 5;
-                if (currentMainTab == 2) currentPage = 6;
-                if (currentMainTab == 3) currentPage = 7;
+                if (currentMainTab == 1) currentPage = 6;
+                if (currentMainTab == 2) currentPage = 7;
+                if (currentMainTab == 3) currentPage = 8;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -785,9 +786,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 currentMainTab = Math.min(3, currentMainTab + 1);
                 if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 5;
-                if (currentMainTab == 2) currentPage = 6;
-                if (currentMainTab == 3) currentPage = 7;
+                if (currentMainTab == 1) currentPage = 6;
+                if (currentMainTab == 2) currentPage = 7;
+                if (currentMainTab == 3) currentPage = 8;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -940,9 +941,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     case 1: int pei = java.util.Arrays.asList(peLabels).indexOf(p.pictureEffect != null ? p.pictureEffect.toLowerCase() : "off"); if (pei == -1) pei = 0; p.pictureEffect = peLabels[(pei + dir + peLabels.length) % peLabels.length]; break;
                     case 2: int ti = java.util.Arrays.asList(toneLabels).indexOf(p.peToyCameraTone != null ? p.peToyCameraTone.toLowerCase() : "normal"); if (ti == -1) ti = 0; p.peToyCameraTone = toneLabels[(ti + dir + toneLabels.length) % toneLabels.length]; break;
                     case 3: p.vignetteHardware = Math.max(-16, Math.min(16, p.vignetteHardware + dir)); break;
+                    case 4: p.softFocusLevel = Math.max(1, Math.min(3, p.softFocusLevel + dir)); break;
+                }
+            } else if (currentPage == 5) {
+                String[] matrixLabels = {"OFF", "TEST 1", "TEST 2", "TEST 3"};
+                switch(sel) {
+                    case 0: p.shadingRed = Math.max(-16, Math.min(16, p.shadingRed + dir)); break;
+                    case 1: p.shadingBlue = Math.max(-16, Math.min(16, p.shadingBlue + dir)); break;
+                    case 2: p.sharpnessGain = Math.max(-7, Math.min(7, p.sharpnessGain + dir)); break;
+                    case 3: int mi = java.util.Arrays.asList(matrixLabels).indexOf(p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF"); if (mi == -1) mi = 0; p.rgbMatrixPreset = matrixLabels[(mi + dir + matrixLabels.length) % matrixLabels.length]; break;
                 }
             }
-        } else if (currentPage == 5) {
+        } else if (currentPage == 6) {
             switch(sel) {
                 case 0: recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); break;
                 case 1: 
@@ -1180,6 +1190,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         }
         
+        // 5. Deep Hardware Hacks (Edge Shading, Clarity Gain, Bloom, RGB Matrix)
+        if (p.get("lens-correction") != null) p.set("lens-correction", "true"); // Force mapping to activate
+        if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", String.valueOf(prof.shadingRed));
+        if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", String.valueOf(prof.shadingBlue));
+        
+        if (p.get("sharpness-gain") != null) p.set("sharpness-gain", String.valueOf(prof.sharpnessGain));
+        if (p.get("sharpness-gain-mode") != null) p.set("sharpness-gain-mode", "true"); // Activate clarity mode
+        
+        if (p.get("pe-soft-focus-effect-level") != null) p.set("pe-soft-focus-effect-level", String.valueOf(prof.softFocusLevel));
+        
+        if (p.get("rgb-matrix-mode") != null) {
+            if ("OFF".equals(prof.rgbMatrixPreset)) {
+                p.set("rgb-matrix-mode", "false");
+            } else {
+                p.set("rgb-matrix-mode", "true");
+                if ("TEST 1".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "10,0,0,0,10,0,0,0,10");
+                else if ("TEST 2".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "-10,0,0,0,-10,0,0,0,-10");
+                else if ("TEST 3".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "0,10,0,0,0,10,10,0,0");
+            }
+        }
+        
         try { c.setParameters(p); } catch (Exception e) {}
     }
 
@@ -1215,23 +1246,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTabRTL.setTextColor(currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.GRAY);
         tvTabSettings.setTextColor(currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.GRAY);
         tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
-        tvTabSupport.setTextColor(currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.GRAY); // <-- New highlight rule
+        tvTabSupport.setTextColor(currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.GRAY); 
         
-        if (currentPage == 1) tvMenuSubtitle.setText("Software Engine (Page 1/4)");
-        else if (currentPage == 2) tvMenuSubtitle.setText("Standard Tone (Page 2/4)");
-        else if (currentPage == 3) tvMenuSubtitle.setText("6-Axis Color Matrix (Page 3/4)");
-        else if (currentPage == 4) tvMenuSubtitle.setText("Experimental Optics (Page 4/4)");
-        else if (currentPage == 5) tvMenuSubtitle.setText("Global Settings");
-        else if (currentPage == 6) tvMenuSubtitle.setText("Web Dashboard Server");
-        else if (currentPage == 7) tvMenuSubtitle.setText("Resources & Community");
+        if (currentPage == 1) tvMenuSubtitle.setText("Software Engine (Page 1/5)");
+        else if (currentPage == 2) tvMenuSubtitle.setText("Standard Tone (Page 2/5)");
+        else if (currentPage == 3) tvMenuSubtitle.setText("6-Axis Color Matrix (Page 3/5)");
+        else if (currentPage == 4) tvMenuSubtitle.setText("Experimental Optics (Page 4/5)");
+        else if (currentPage == 5) tvMenuSubtitle.setText("Deep Hardware Hacks (Page 5/5)");
+        else if (currentPage == 6) tvMenuSubtitle.setText("Global Settings");
+        else if (currentPage == 7) tvMenuSubtitle.setText("Web Dashboard Server");
+        else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community");
 
         // Hide all rows initially
         for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
-        if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE); // <-- Hide QR screen by default
+        if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE); 
 
         // --- NEW SUPPORT TAB LOGIC ---
-        // If we are on the Support tab, show the QR screen and skip building the rows!
-        if (currentPage == 7) {
+        if (currentPage == 8) {
             supportTabContainer.setVisibility(View.VISIBLE);
             currentItemCount = 0;
             return; 
@@ -1246,10 +1277,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         if (currentMainTab == 0) {
             if (currentPage == 1) { 
-                itemCount = 8; // Now 8 items!
+                itemCount = 8; 
                 String[] rLabels = {"Recipe Slot", "Profile Name", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
                 
-                // --- ARCADE NAMING RENDER LOGIC ---
                 String rawName = p.profileName;
                 if (rawName == null) rawName = "";
                 while (rawName.length() < 8) rawName += " ";
@@ -1285,7 +1315,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 for (int i = 0; i < 8; i++) { 
                     menuLabels[i].setText(rLabels[i]); 
                     if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) {
-                        // Render the HTML for the Arcade UI spacing/coloring
                         menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
                     } else {
                         menuValues[i].setText(rValues[i].trim()); 
@@ -1309,21 +1338,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 };
                 for (int i = 0; i < 6; i++) { menuLabels[i].setText(mLabels[i]); menuValues[i].setText(mValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 4) {
-                itemCount = 4;
-                String[] eLabels = {"Color Mode", "Picture Effect", "Toy Cam Tone", "HW Vignette"};
+                itemCount = 5;
+                String[] eLabels = {"Color Mode", "Picture Effect", "Toy Cam Tone", "HW Vignette", "Soft Focus Lvl"};
                 String colorModeStr = p.colorMode != null ? p.colorMode.toUpperCase() : "STANDARD";
                 String picEffStr = p.pictureEffect != null ? p.pictureEffect.toUpperCase() : "OFF";
                 String toneStr = p.peToyCameraTone != null ? p.peToyCameraTone.toUpperCase() : "NORMAL";
-                String[] eValues = { colorModeStr, picEffStr, toneStr, String.format("%+d", p.vignetteHardware) };
-                for (int i = 0; i < 4; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                String[] eValues = { colorModeStr, picEffStr, toneStr, String.format("%+d", p.vignetteHardware), String.valueOf(p.softFocusLevel) };
+                for (int i = 0; i < 5; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+            } else if (currentPage == 5) {
+                itemCount = 4;
+                String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "Micro-Contrast Gain", "RGB Matrix Exploit"};
+                String matrixStr = p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF";
+                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), String.format("%+d", p.sharpnessGain), matrixStr };
+                for (int i = 0; i < 4; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             }
-        } else if (currentPage == 5) {
+        } else if (currentPage == 6) {
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
             String[] gLabels = {"Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "JPEG Quality"};
             String[] gValues = { qLabels[recipeManager.getQualityIndex()], scn, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF", String.valueOf(prefJpegQuality) };
             for (int i = 0; i < 6; i++) { menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
-        } else if (currentPage == 6) {
+        } else if (currentPage == 7) {
             itemCount = 3;
             String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
             String[] cValues = { hotspotStatus, wifiStatus, "" };
@@ -1332,7 +1367,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         for (int i = 0; i < itemCount; i++) {
             if (i == menuSelection) {
-                // If editing or naming, hold the highlight state!
                 if (isMenuEditing || isNamingMode) {
                     menuRows[i].setBackgroundColor(Color.TRANSPARENT);
                     menuLabels[i].setTextColor(Color.WHITE);
@@ -1464,19 +1498,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTabRTL = createTabHeader("RECIPES");
         tvTabSettings = createTabHeader("SETTINGS");
         tvTabNetwork = createTabHeader("NETWORK");
-        tvTabSupport = createTabHeader("SUPPORT"); // <-- New Tab
+        tvTabSupport = createTabHeader("SUPPORT");
         
         tabHeaderLayout.addView(tvTabRTL);
         tabHeaderLayout.addView(tvTabSettings);
         tabHeaderLayout.addView(tvTabNetwork);
-        tabHeaderLayout.addView(tvTabSupport); // <-- Add to header
+        tabHeaderLayout.addView(tvTabSupport); 
         menuContainer.addView(tabHeaderLayout);
 
         // --- BUILD THE SUPPORT QR SCREEN PROGRAMMATICALLY ---
         supportTabContainer = new LinearLayout(this);
         supportTabContainer.setOrientation(LinearLayout.VERTICAL);
         supportTabContainer.setGravity(Gravity.CENTER);
-        supportTabContainer.setVisibility(View.GONE); // Hidden by default
+        supportTabContainer.setVisibility(View.GONE); 
 
         TextView tvSupportTitle = new TextView(this);
         tvSupportTitle.setText("filmOS");
@@ -1491,7 +1525,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvSupportSub.setPadding(0, 0, 0, 20);
 
         ImageView qrView = new ImageView(this);
-        qrView.setImageResource(R.drawable.qr_hub); // Ensure qr_hub.png is in your drawable folder!
+        qrView.setImageResource(R.drawable.qr_hub);
         qrView.setBackgroundColor(Color.WHITE);
         qrView.setPadding(10, 10, 10, 10);
         qrView.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1516,7 +1550,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         supportTabContainer.addView(tvUrl);
         supportTabContainer.addView(tvDesc);
 
-        // Add to main menu container, but keep it at the top so it renders instead of the rows
         menuContainer.addView(supportTabContainer, new LinearLayout.LayoutParams(-1, -1));
         
         tvMenuSubtitle = new TextView(this);
@@ -1582,12 +1615,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView createTabHeader(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(16); // Shrunk from 22 to fit 4 tabs beautifully
+        tv.setTextSize(16); 
         tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setGravity(Gravity.CENTER); // Center the text inside its column
+        tv.setGravity(Gravity.CENTER); 
         tv.setPadding(0, 0, 0, 10);
         
-        // THE MAGIC TRICK: weight = 1.0f forces the 4 tabs to share the screen space equally
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         tv.setLayoutParams(lp);
         
@@ -1921,7 +1953,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 if (menuSelection == 0) hotspotStatus = status;
                 else if (menuSelection == 1) wifiStatus = status;
-                if (isMenuOpen && currentPage == 6) renderMenu(); 
+                if (isMenuOpen && currentPage == 7) renderMenu(); 
             }
         });
     }

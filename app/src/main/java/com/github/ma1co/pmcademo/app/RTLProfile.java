@@ -35,6 +35,13 @@ public class RTLProfile {
     public String peToyCameraTone = "normal";
     public int vignetteHardware = 0; // -16 to +16
 
+    // --- PHASE 4: DEEP HARDWARE HACKS ---
+    public int softFocusLevel = 1; // Ranges 1 to 3
+    public int shadingRed = 0;     // Ranges -16 to +16
+    public int shadingBlue = 0;    // Ranges -16 to +16
+    public int sharpnessGain = 0;  // Ranges -7 to +7
+    public String rgbMatrixPreset = "OFF"; // OFF, TEST 1, TEST 2, TEST 3
+
     // Constructor sets the new dynamic default names based on the slot (e.g., "RECIPE 1")
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
