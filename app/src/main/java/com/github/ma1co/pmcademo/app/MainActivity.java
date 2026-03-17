@@ -1165,7 +1165,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
         tvTabSupport.setTextColor(currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.GRAY); // <-- New highlight rule
         
-        if (currentPage == 1) tvMenuSubtitle.setText("RTL Base (Page 1/2)");
+        if (currentPage == 1) tvMenuSubtitle.setText("Recipe Base (Page 1/2)");
         else if (currentPage == 2) tvMenuSubtitle.setText("Color & Tone (Page 2/2)");
         else if (currentPage == 3) tvMenuSubtitle.setText("Global Settings");
         else if (currentPage == 4) tvMenuSubtitle.setText("Web Dashboard Server");
@@ -1388,7 +1388,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tabHeaderLayout.setGravity(Gravity.CENTER);
         tabHeaderLayout.setPadding(0, 0, 0, 10);
         
-        tvTabRTL = createTabHeader("RTL");
+        tvTabRTL = createTabHeader("RECIPES");
         tvTabSettings = createTabHeader("SETTINGS");
         tvTabNetwork = createTabHeader("NETWORK");
         tvTabSupport = createTabHeader("SUPPORT"); // <-- New Tab
