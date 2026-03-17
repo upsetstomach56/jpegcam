@@ -42,6 +42,10 @@ public class RTLProfile {
     public int shadingBlue = 0;    // Ranges -16 to +16
     public int sharpnessGain = 0;  // Ranges -7 to +7
     public String rgbMatrixPreset = "OFF"; // OFF, TEST 1, TEST 2, TEST 3
+    public int mixRedBlue = 0;   // Affects Red channel
+    public int mixGreenRed = 0;  // Affects Green channel
+    public int mixBlueGreen = 0; // Affects Blue channel
+
 
     // Constructor sets the new dynamic default names based on the slot (e.g., "RECIPE 1")
     public RTLProfile(int slotIndex) {

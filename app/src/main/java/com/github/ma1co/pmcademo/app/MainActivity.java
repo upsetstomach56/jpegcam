@@ -1105,6 +1105,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         RTLProfile prof = recipeManager.getCurrentProfile(); 
         Camera.Parameters p = c.getParameters();
         
+        // 1. Basic Tone & WB
         if (p.get("color-mode") != null) p.set("color-mode", prof.colorMode != null ? prof.colorMode : "standard");
         
         String wb = "auto";
@@ -1113,13 +1114,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         else if ("CLD".equals(prof.whiteBalance)) wb = "cloudy-daylight"; 
         else if ("INC".equals(prof.whiteBalance)) wb = "incandescent"; 
         else if ("FLR".equals(prof.whiteBalance)) wb = "fluorescent";
-        
         p.setWhiteBalance(wb);
         
         if (p.get("white-balance-shift-mode") != null) p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
         if (p.get("white-balance-shift-lb") != null) p.set("white-balance-shift-lb", String.valueOf(prof.wbShift)); 
         if (p.get("white-balance-shift-cc") != null) p.set("white-balance-shift-cc", String.valueOf(prof.wbShiftGM));
 
+        // 2. DRO & Contrast
         if (p.get("dro-mode") != null) {
             if ("OFF".equals(prof.dro)) p.set("dro-mode", "off"); 
             else if ("AUTO".equals(prof.dro)) p.set("dro-mode", "auto"); 
@@ -1135,6 +1136,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("saturation") != null) p.set("saturation", String.valueOf(prof.saturation)); 
         if (p.get("sharpness") != null) p.set("sharpness", String.valueOf(prof.sharpness));
 
+        // 3. THE 6-AXIS UNLOCK (Order Matters!)
+        // We set the mode FIRST to wake up the 6-axis registers.
+        if (p.get("pro-color-mode") != null) {
+            // If the user hasn't chosen a Pro mode on Page 5, we force 'pro-standard' 
+            // in the background to ensure the sliders on Page 3 actually work.
+            String proBase = (prof.proColorMode == null || "off".equals(prof.proColorMode.toLowerCase())) ? "pro-standard" : prof.proColorMode;
+            p.set("pro-color-mode", proBase);
+        }
+
         if (p.get("color-depth-red") != null) p.set("color-depth-red", String.valueOf(prof.colorDepthRed));
         if (p.get("color-depth-green") != null) p.set("color-depth-green", String.valueOf(prof.colorDepthGreen));
         if (p.get("color-depth-blue") != null) p.set("color-depth-blue", String.valueOf(prof.colorDepthBlue));
@@ -1142,10 +1152,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("color-depth-magenta") != null) p.set("color-depth-magenta", String.valueOf(prof.colorDepthMagenta));
         if (p.get("color-depth-yellow") != null) p.set("color-depth-yellow", String.valueOf(prof.colorDepthYellow));
 
-        if (p.get("pro-color-mode") != null && prof.proColorMode != null && !"off".equals(prof.proColorMode.toLowerCase())) {
-            p.set("pro-color-mode", prof.proColorMode);
-        }
-
+        // 4. Picture Effects & Optics
         if (p.get("picture-effect") != null) {
             p.set("picture-effect", prof.pictureEffect != null ? prof.pictureEffect : "off");
             if ("toy-camera".equals(prof.pictureEffect)) {
@@ -1153,25 +1160,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 p.set("pe-toy-camera-tuning", String.valueOf(prof.vignetteHardware)); 
             }
         }
-        
         if (p.get("lens-correction") != null) p.set("lens-correction", "true");
         if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", String.valueOf(prof.shadingRed));
         if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", String.valueOf(prof.shadingBlue));
-        
         if (p.get("sharpness-gain") != null) p.set("sharpness-gain", String.valueOf(prof.sharpnessGain));
         if (p.get("sharpness-gain-mode") != null) p.set("sharpness-gain-mode", "true");
-        
         if (p.get("pe-soft-focus-effect-level") != null) p.set("pe-soft-focus-effect-level", String.valueOf(prof.softFocusLevel));
-        
+
+        // 5. RGB MATRIX EXPLOIT (Fixed values to prevent dimming)
+        // --- DYNAMIC RGB CHANNEL MIXER ---
         if (p.get("rgb-matrix-mode") != null) {
             if ("OFF".equals(prof.rgbMatrixPreset)) {
                 p.set("rgb-matrix-mode", "false");
+                p.set("rgb-matrix", "256,0,0,0,256,0,0,0,256"); 
             } else {
                 p.set("rgb-matrix-mode", "true");
-                if ("TEST 1".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "256,0,0,0,256,0,0,0,256");
-                else if ("TEST 2".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "0,0,0,0,256,0,0,0,256");
-                else if ("TEST 3".equals(prof.rgbMatrixPreset)) p.set("rgb-matrix", "0,256,0,256,0,0,0,0,256");
+                
+                // We keep the diagonal at 256 for stable brightness (Unity Gain)
+                // We map the slider (-100 to 100) directly into the mix registers
+                int r_b = prof.mixRedBlue;   // Red channel crosstalk
+                int g_r = prof.mixGreenRed;  // Green channel crosstalk
+                int b_g = prof.mixBlueGreen; // Blue channel crosstalk
+
+                // Matrix format: R->R, G->R, B->R,  R->G, G->G, B->G,  R->B, G->B, B->B
+                String matrixString = String.format(
+                    "256,0,%d, %d,256,0, 0,%d,256", 
+                    r_b, g_r, b_g
+                );
+                
+                p.set("rgb-matrix", matrixString);
             }
+        }
         }
         
         try { c.setParameters(p); } catch (Exception e) {}
