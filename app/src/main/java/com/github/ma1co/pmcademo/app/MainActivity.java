@@ -906,14 +906,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     case 4: p.softFocusLevel = Math.max(1, Math.min(3, p.softFocusLevel + dir)); break;
                 }
             } else if (currentPage == 5) {
-                String[] matrixLabels = {"OFF", "TEST 1", "TEST 2", "TEST 3"};
-                String[] proLabels = {"off", "pro-vivid", "pro-standard", "pro-portrait"};
                 switch(sel) {
                     case 0: p.shadingRed = Math.max(-16, Math.min(16, p.shadingRed + dir)); break;
                     case 1: p.shadingBlue = Math.max(-16, Math.min(16, p.shadingBlue + dir)); break;
                     case 2: p.sharpnessGain = Math.max(-7, Math.min(7, p.sharpnessGain + dir)); break;
-                    case 3: int pi = java.util.Arrays.asList(proLabels).indexOf(p.proColorMode != null ? p.proColorMode.toLowerCase() : "off"); if (pi == -1) pi = 0; p.proColorMode = proLabels[(pi + dir + proLabels.length) % proLabels.length]; break;
-                    case 4: int mi = java.util.Arrays.asList(matrixLabels).indexOf(p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF"); if (mi == -1) mi = 0; p.rgbMatrixPreset = matrixLabels[(mi + dir + matrixLabels.length) % matrixLabels.length]; break;
+                    case 3: 
+                        String[] proLabels = {"off", "pro-vivid", "pro-standard", "pro-portrait"};
+                        int pi = java.util.Arrays.asList(proLabels).indexOf(p.proColorMode != null ? p.proColorMode.toLowerCase() : "off"); 
+                        if (pi == -1) pi = 0; 
+                        p.proColorMode = proLabels[(pi + dir + proLabels.length) % proLabels.length]; 
+                        break;
+                    case 4: p.mixRedBlue = Math.max(-100, Math.min(100, p.mixRedBlue + (dir * 5))); break;
+                    case 5: p.mixGreenRed = Math.max(-100, Math.min(100, p.mixGreenRed + (dir * 5))); break;
+                    case 6: p.mixBlueGreen = Math.max(-100, Math.min(100, p.mixBlueGreen + (dir * 5))); break;
                 }
             }
         } else if (currentPage == 6) {
@@ -1136,11 +1141,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("saturation") != null) p.set("saturation", String.valueOf(prof.saturation)); 
         if (p.get("sharpness") != null) p.set("sharpness", String.valueOf(prof.sharpness));
 
-        // 3. THE 6-AXIS UNLOCK (Order Matters!)
-        // We set the mode FIRST to wake up the 6-axis registers.
+        // 3. 6-Axis Depths (Unlocked via Pro Mode base)
         if (p.get("pro-color-mode") != null) {
-            // If the user hasn't chosen a Pro mode on Page 5, we force 'pro-standard' 
-            // in the background to ensure the sliders on Page 3 actually work.
             String proBase = (prof.proColorMode == null || "off".equals(prof.proColorMode.toLowerCase())) ? "pro-standard" : prof.proColorMode;
             p.set("pro-color-mode", proBase);
         }
@@ -1167,33 +1169,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("sharpness-gain-mode") != null) p.set("sharpness-gain-mode", "true");
         if (p.get("pe-soft-focus-effect-level") != null) p.set("pe-soft-focus-effect-level", String.valueOf(prof.softFocusLevel));
 
-        // 5. RGB MATRIX EXPLOIT (Fixed values to prevent dimming)
-        // --- DYNAMIC RGB CHANNEL MIXER ---
+        // 5. THE CHANNEL MIXER (BIONZ Matrix Exploit)
         if (p.get("rgb-matrix-mode") != null) {
-            if ("OFF".equals(prof.rgbMatrixPreset)) {
+            boolean isMixing = (prof.mixRedBlue != 0 || prof.mixGreenRed != 0 || prof.mixBlueGreen != 0);
+            if (!isMixing) {
                 p.set("rgb-matrix-mode", "false");
-                p.set("rgb-matrix", "256,0,0,0,256,0,0,0,256"); 
+                p.set("rgb-matrix", "256,0,0, 0,256,0, 0,0,256"); 
             } else {
                 p.set("rgb-matrix-mode", "true");
-                
-                // We keep the diagonal at 256 for stable brightness (Unity Gain)
-                // We map the slider (-100 to 100) directly into the mix registers
-                int r_b = prof.mixRedBlue;   // Red channel crosstalk
-                int g_r = prof.mixGreenRed;  // Green channel crosstalk
-                int b_g = prof.mixBlueGreen; // Blue channel crosstalk
-
-                // Matrix format: R->R, G->R, B->R,  R->G, G->G, B->G,  R->B, G->B, B->B
-                String matrixString = String.format(
-                    "256,0,%d, %d,256,0, 0,%d,256", 
-                    r_b, g_r, b_g
-                );
-                
-                p.set("rgb-matrix", matrixString);
+                // Matrix: R->R, G->R, B->R,  R->G, G->G, B->G,  R->B, G->B, B->B
+                // 256 on diagonal = 1.0 multiplier (Full Brightness)
+                String mStr = String.format("256,0,%d, %d,256,0, 0,%d,256", 
+                                prof.mixRedBlue, prof.mixGreenRed, prof.mixBlueGreen);
+                p.set("rgb-matrix", mStr);
             }
         }
-        }
         
-        try { c.setParameters(p); } catch (Exception e) {}
+        try { c.setParameters(p); } catch (Exception e) { Log.e("filmOS", "ISP Error: " + e.getMessage()); }
     }
 
     private void setAutoPowerOffMode(boolean enable) {
@@ -1305,10 +1297,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String[] eValues = { (p.colorMode != null ? p.colorMode : "STANDARD").toUpperCase(), (p.pictureEffect != null ? p.pictureEffect : "OFF").toUpperCase(), (p.peToyCameraTone != null ? p.peToyCameraTone : "NORMAL").toUpperCase(), String.format("%+d", p.vignetteHardware), String.valueOf(p.softFocusLevel) };
                 for (int i = 0; i < 5; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 5) {
-                itemCount = 5;
-                String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "Micro-Contrast Gain", "Pro Color Engine", "RGB Matrix Exploit"};
-                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), String.format("%+d", p.sharpnessGain), (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(), (p.rgbMatrixPreset != null ? p.rgbMatrixPreset : "OFF").toUpperCase() };
-                for (int i = 0; i < 5; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                itemCount = 7;
+                String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "Micro-Contrast Gain", "Pro Color Base", "Mix: Cine Red", "Mix: Gold Green", "Mix: Deep Teal"};
+                String[] dValues = { 
+                    String.format("%+d", p.shadingRed), 
+                    String.format("%+d", p.shadingBlue), 
+                    String.format("%+d", p.sharpnessGain), 
+                    (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(),
+                    String.format("%+d", p.mixRedBlue),
+                    String.format("%+d", p.mixGreenRed),
+                    String.format("%+d", p.mixBlueGreen)
+                };
+                for (int i = 0; i < 7; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             }
         } else if (currentPage == 6) {
             itemCount = 6;

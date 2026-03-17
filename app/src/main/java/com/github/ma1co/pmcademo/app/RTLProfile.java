@@ -1,7 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
 public class RTLProfile {
-    // --- NEW: Arcade-Style 8-Character Name ---
     public String profileName; 
 
     // Look / Base
@@ -21,7 +20,7 @@ public class RTLProfile {
     public int saturation = 0;
     public int sharpness = 0;
 
-    // --- PHASE 3: HIDDEN HARDWARE COLOR MATRIX (-7 to +7) ---
+    // PHASE 3: HIDDEN HARDWARE COLOR MATRIX (-7 to +7)
     public int colorDepthRed = 0;
     public int colorDepthGreen = 0;
     public int colorDepthBlue = 0;
@@ -29,30 +28,28 @@ public class RTLProfile {
     public int colorDepthMagenta = 0;
     public int colorDepthYellow = 0;
 
-    // --- PHASE 3: EXPERIMENTAL OPTICS ---
+    // PHASE 3: EXPERIMENTAL OPTICS
     public String colorMode = "standard"; 
     public String pictureEffect = "off";
     public String peToyCameraTone = "normal";
     public int vignetteHardware = 0; // -16 to +16
 
-    // --- PHASE 4: DEEP HARDWARE HACKS ---
+    // PHASE 4: CHANNEL MIXER (-100 to +100)
+    public int mixRedBlue = 0;   // Adds Blue into Red channel
+    public int mixGreenRed = 0;  // Adds Red into Green channel
+    public int mixBlueGreen = 0; // Adds Green into Blue channel
+    
+    // DEEP HARDWARE HACKS
     public String proColorMode = "off";
-    public int softFocusLevel = 1; // Ranges 1 to 3
-    public int shadingRed = 0;     // Ranges -16 to +16
-    public int shadingBlue = 0;    // Ranges -16 to +16
-    public int sharpnessGain = 0;  // Ranges -7 to +7
-    public String rgbMatrixPreset = "OFF"; // OFF, TEST 1, TEST 2, TEST 3
-    public int mixRedBlue = 0;   // Affects Red channel
-    public int mixGreenRed = 0;  // Affects Green channel
-    public int mixBlueGreen = 0; // Affects Blue channel
+    public int softFocusLevel = 1; 
+    public int shadingRed = 0;     
+    public int shadingBlue = 0;    
+    public int sharpnessGain = 0;  
 
-
-    // Constructor sets the new dynamic default names based on the slot (e.g., "RECIPE 1")
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
     }
     
-    // Fallback constructor just in case
     public RTLProfile() {
         this.profileName = "RECIPE";
     }
