@@ -132,6 +132,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int menuSelection = 0;
     private int currentItemCount = 0;
     private String savedFocusMode = null;
+    private String originalCameraParamsString = null;
 
     // --- ARCADE NAMING VARS ---
     private boolean isNamingMode = false;
@@ -1866,6 +1867,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         syncHardwareState();
         
         if (cameraManager != null) {
+            // --- CAPTURE THE PRISTINE SONY STATE ---
+            if (cameraManager.getCamera() != null) {
+                originalCameraParamsString = cameraManager.getCamera().getParameters().flatten();
+            }
+            
             hardwareFocalLength = cameraManager.getInitialFocalLength();
             if (hardwareFocalLength > 0.0f) {
                 isNativeLensAttached = true;
