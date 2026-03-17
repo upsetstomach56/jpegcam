@@ -608,6 +608,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         else if (currentPage == 2) menuSelection = 6;
                         else if (currentPage == 3) menuSelection = 5;
                         else if (currentPage == 4) menuSelection = 4;
+                        else if (currentPage == 5) menuSelection = 4; 
                     } else { 
                         menuSelection = currentItemCount - 1; 
                     }
@@ -935,10 +936,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             } else if (currentPage == 5) {
                 String[] matrixLabels = {"OFF", "TEST 1", "TEST 2", "TEST 3"};
+                String[] proLabels = {"off", "pro-vivid", "pro-standard", "pro-portrait"};
                 switch(sel) {
                     case 0: p.shadingRed = Math.max(-16, Math.min(16, p.shadingRed + dir)); break;
                     case 1: p.shadingBlue = Math.max(-16, Math.min(16, p.shadingBlue + dir)); break;
-                    case 2: int mi = java.util.Arrays.asList(matrixLabels).indexOf(p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF"); if (mi == -1) mi = 0; p.rgbMatrixPreset = matrixLabels[(mi + dir + matrixLabels.length) % matrixLabels.length]; break;
+                    case 2: p.sharpnessGain = Math.max(-7, Math.min(7, p.sharpnessGain + dir)); break;
+                    case 3: int pi = java.util.Arrays.asList(proLabels).indexOf(p.proColorMode != null ? p.proColorMode.toLowerCase() : "off"); if (pi == -1) pi = 0; p.proColorMode = proLabels[(pi + dir + proLabels.length) % proLabels.length]; break;
+                    case 4: int mi = java.util.Arrays.asList(matrixLabels).indexOf(p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF"); if (mi == -1) mi = 0; p.rgbMatrixPreset = matrixLabels[(mi + dir + matrixLabels.length) % matrixLabels.length]; break;
                 }
             }
         } else if (currentPage == 6) {
@@ -1167,6 +1171,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("color-depth-magenta") != null) p.set("color-depth-magenta", String.valueOf(prof.colorDepthMagenta));
         if (p.get("color-depth-yellow") != null) p.set("color-depth-yellow", String.valueOf(prof.colorDepthYellow));
 
+        if (p.get("pro-color-mode") != null && prof.proColorMode != null && !"off".equals(prof.proColorMode)) {
+            p.set("pro-color-mode", prof.proColorMode);
+        }
+
         if (p.get("picture-effect") != null) {
             p.set("picture-effect", prof.pictureEffect != null ? prof.pictureEffect : "off");
             if ("toy-camera".equals(prof.pictureEffect)) {
@@ -1178,6 +1186,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("lens-correction") != null) p.set("lens-correction", "true");
         if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", String.valueOf(prof.shadingRed));
         if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", String.valueOf(prof.shadingBlue));
+        
+        if (p.get("sharpness-gain") != null) p.set("sharpness-gain", String.valueOf(prof.sharpnessGain));
+        if (p.get("sharpness-gain-mode") != null) p.set("sharpness-gain-mode", "true");
         
         if (p.get("pe-soft-focus-effect-level") != null) p.set("pe-soft-focus-effect-level", String.valueOf(prof.softFocusLevel));
         
@@ -1325,11 +1336,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String[] eValues = { colorModeStr, picEffStr, toneStr, String.format("%+d", p.vignetteHardware), String.valueOf(p.softFocusLevel) };
                 for (int i = 0; i < 5; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 5) {
-                itemCount = 3;
-                String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "RGB Matrix Exploit"};
+                itemCount = 5;
+                String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "Micro-Contrast Gain", "Pro Color Engine", "RGB Matrix Exploit"};
+                String proStr = p.proColorMode != null ? p.proColorMode.toUpperCase() : "OFF";
                 String matrixStr = p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF";
-                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), matrixStr };
-                for (int i = 0; i < 3; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), String.format("%+d", p.sharpnessGain), proStr, matrixStr };
+                for (int i = 0; i < 5; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             }
         } else if (currentPage == 6) {
             itemCount = 6;
@@ -1662,6 +1674,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onPause() { 
         super.onPause(); 
         uiHandler.removeCallbacksAndMessages(null); 
+        
+        // --- SAFE EXIT CLEANUP (CRASH FIX) ---
+        if (cameraManager != null && cameraManager.getCamera() != null) {
+            try {
+                Camera.Parameters p = cameraManager.getCamera().getParameters();
+                if (p.get("rgb-matrix-mode") != null) p.set("rgb-matrix-mode", "false");
+                if (p.get("picture-effect") != null) p.set("picture-effect", "off");
+                if (p.get("lens-correction") != null) p.set("lens-correction", "false");
+                cameraManager.getCamera().setParameters(p);
+            } catch (Exception e) {}
+        }
         
         if (cameraManager != null) cameraManager.close(); 
         try { unregisterReceiver(sonyCameraReceiver); unregisterReceiver(batteryReceiver); } catch (Exception e) {}

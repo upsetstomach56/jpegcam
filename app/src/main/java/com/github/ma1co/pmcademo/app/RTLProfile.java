@@ -36,6 +36,7 @@ public class RTLProfile {
     public int vignetteHardware = 0; // -16 to +16
 
     // --- PHASE 4: DEEP HARDWARE HACKS ---
+    public String proColorMode = "off";
     public int softFocusLevel = 1; // Ranges 1 to 3
     public int shadingRed = 0;     // Ranges -16 to +16
     public int shadingBlue = 0;    // Ranges -16 to +16
