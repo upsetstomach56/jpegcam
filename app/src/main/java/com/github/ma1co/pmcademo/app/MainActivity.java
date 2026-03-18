@@ -80,12 +80,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView[] menuLabels = new TextView[8];
     private TextView[] menuValues = new TextView[8];
 
-    // --- MATRIX OVERLAY VARIABLES ---
-    private boolean isMatrixEditMode = false;
-    private int matrixEditSelection = 0;
-    private LinearLayout matrixOverlayContainer;
-    private TextView[] matrixLabels = new TextView[9];
-    private TextView[] matrixValues = new TextView[9];
+    // --- UNIVERSAL HUD VARIABLES ---
+    private boolean isHudActive = false;
+    private int hudSelection = 0;
+    private int currentHudMode = 0; // 0 = Matrix, 1 = 6-Axis, 2 = Edge Shading, etc.
+    private LinearLayout hudOverlayContainer;
+    private LinearLayout[] hudCells = new LinearLayout[9];
+    private TextView[] hudLabels = new TextView[9];
+    private TextView[] hudValues = new TextView[9];
     
     private BatteryView batteryIcon;
     private ImageView playbackImageView;
@@ -497,11 +499,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isPlaybackMode) { exitPlayback(); return; }
         if (isProcessing) return;
 
-        // --- MATRIX HUD TOGGLE ---
-        if (isMatrixEditMode) {
-            // EXITING HUD: Hide overlay, show menu
-            isMatrixEditMode = false;
-            matrixOverlayContainer.setVisibility(View.GONE);
+        // --- UNIVERSAL HUD TOGGLE ---
+        if (isHudActive) {
+            // EXITING HUD
+            isHudActive = false;
+            hudOverlayContainer.setVisibility(View.GONE);
             mainUIContainer.setVisibility(View.GONE);
             menuContainer.setVisibility(View.VISIBLE);
             recipeManager.savePreferences();
@@ -509,15 +511,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         RTLProfile p = recipeManager.getCurrentProfile();
+        
+        // LAUNCH MATRIX HUD
         if (isMenuOpen && currentMainTab == 0 && currentPage == 3 && p.isMatrixAdvanced && menuSelection == 1) {
-            // ENTERING HUD: Hide menu, show overlay + live view
-            isMatrixEditMode = true;
-            matrixEditSelection = 0; // Reset cursor to R-R
-            menuContainer.setVisibility(View.GONE);
-            mainUIContainer.setVisibility(View.VISIBLE);
-            setHUDVisibility(View.GONE); // Hide the standard mode/battery text to clear the screen
-            matrixOverlayContainer.setVisibility(View.VISIBLE);
-            updateMatrixOverlayUI();
+            launchHudMode(0);
+            return;
+        }
+        
+        // LAUNCH 6-AXIS HUD
+        // Note: Right now 6-Axis spans rows 1-6 on Page 4. If they hit enter on ANY of those rows, launch the HUD!
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 4 && menuSelection >= 1 && menuSelection <= 6) {
+            launchHudMode(1);
+            // IMPROVEMENT: Auto-select the specific color the user was just looking at in the menu
+            hudSelection = menuSelection - 1; 
+            updateHudUI(); // Refresh the UI to highlight the correct color box
             return;
         }
         
@@ -607,7 +614,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onUpPressed() {
-        if (isMatrixEditMode) { handleMatrixAdjustment(1); return; }
+        if (isHudActive) { handleHudAdjustment(1); return; }
         if (isProcessing || waitingForProfileChoice) return;
         if (isCalibrating) {
             if (calibStep == 2) {
@@ -648,7 +655,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onDownPressed() {
-        if (isMatrixEditMode) { handleMatrixAdjustment(-1); return; }
+        if (isHudActive) { handleHudAdjustment(-1); return; }
         if (isProcessing) return;
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
@@ -690,9 +697,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onLeftPressed() {
-        if (isMatrixEditMode) {
-            matrixEditSelection = Math.max(0, matrixEditSelection - 1);
-            updateMatrixOverlayUI();
+        if (isHudActive) {
+            hudSelection = Math.max(0, hudSelection - 1);
+            updateHudUI();
             return;
         }
         if (isProcessing) return;
@@ -757,9 +764,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onRightPressed() {
-        if (isMatrixEditMode) {
-            matrixEditSelection = Math.min(8, matrixEditSelection + 1);
-            updateMatrixOverlayUI();
+        if (isHudActive) {
+            int maxSlots = (currentHudMode == 0) ? 8 : 5; // 9 slots for Matrix, 6 for 6-Axis
+            hudSelection = Math.min(maxSlots, hudSelection + 1);
+            updateHudUI();
             return;
         }
         if (isProcessing) return;
@@ -811,7 +819,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public void onDialRotated(int direction) { 
-        if (isMatrixEditMode) { handleMatrixAdjustment(direction); return; }
+        if (isHudActive) { handleHudAdjustment(direction); return; }
         if (isPlaybackMode) { showPlaybackImage(playbackIndex + direction); } 
         else if (isMenuOpen) {
             if (isNamingMode) { 
@@ -1276,63 +1284,73 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         renderMenu(); 
     }
 
-    // --- HUD MATRIX LOGIC ---
-    private void updateMatrixOverlayUI() {
+    // --- UNIVERSAL HUD ENGINE ---
+    private void updateHudUI() {
         RTLProfile p = recipeManager.getCurrentProfile();
-        for (int i = 0; i < 9; i++) {
-            int displayVal = p.advMatrix[i];
-            
-            // UX Magic: Normalize the 1024 diagonals so they appear as "0" to the user
-            if (i == 0 || i == 4 || i == 8) {
-                displayVal -= 1024;
+        int activeCells = 0;
+        String[] labels = new String[9];
+        String[] values = new String[9];
+
+        // 1. FETCH DATA BASED ON MODE
+        if (currentHudMode == 0) { // MODE 0: MATRIX (9 Slots)
+            activeCells = 9;
+            labels = new String[]{"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
+            for (int i=0; i<9; i++) {
+                int displayVal = p.advMatrix[i];
+                if (i==0 || i==4 || i==8) displayVal -= 1024; // Hide unity gain from user
+                values[i] = displayVal == 0 ? "0" : (displayVal > 0 ? "+" + displayVal : String.valueOf(displayVal));
             }
-            
-            // Format cleanly (e.g., "+200", "-50", "0")
-            String valStr = (displayVal > 0) ? "+" + displayVal : String.valueOf(displayVal);
-            if (displayVal == 0) valStr = "0"; 
-            
-            matrixValues[i].setText(valStr);
-            
-            if (i == matrixEditSelection) {
-                // Highlight active slot in filmOS Orange
-                matrixLabels[i].setTextColor(Color.rgb(230, 50, 15));
-                matrixValues[i].setTextColor(Color.rgb(230, 50, 15));
+        } else if (currentHudMode == 1) { // MODE 1: 6-AXIS (6 Slots)
+            activeCells = 6;
+            labels = new String[]{"RED", "GRN", "BLU", "CYN", "MAG", "YEL"};
+            int[] depths = {p.colorDepthRed, p.colorDepthGreen, p.colorDepthBlue, p.colorDepthCyan, p.colorDepthMagenta, p.colorDepthYellow};
+            for (int i=0; i<6; i++) {
+                values[i] = depths[i] == 0 ? "0" : String.format("%+d", depths[i]);
+            }
+        }
+
+        // 2. PAINT THE SCREEN
+        for (int i = 0; i < 9; i++) {
+            if (i < activeCells) {
+                hudCells[i].setVisibility(View.VISIBLE);
+                hudLabels[i].setText(labels[i]);
+                hudValues[i].setText(values[i]);
+                
+                if (i == hudSelection) {
+                    hudLabels[i].setTextColor(Color.rgb(230, 50, 15));
+                    hudValues[i].setTextColor(Color.rgb(230, 50, 15));
+                } else {
+                    hudLabels[i].setTextColor(Color.GRAY);
+                    hudValues[i].setTextColor(Color.WHITE);
+                }
             } else {
-                matrixLabels[i].setTextColor(Color.GRAY);
-                matrixValues[i].setTextColor(Color.WHITE);
+                hudCells[i].setVisibility(View.GONE); // Hide unused boxes!
             }
         }
     }
 
-    private void handleMatrixAdjustment(int dir) {
+    private void handleHudAdjustment(int dir) {
         RTLProfile p = recipeManager.getCurrentProfile();
-        int step = 25; 
         
-        // 1. Establish the mathematical baseline for the selected slot
-        boolean isDiagonal = (matrixEditSelection == 0 || matrixEditSelection == 4 || matrixEditSelection == 8);
-        int base = isDiagonal ? 1024 : 0;
-        
-        // 2. Calculate the user's current offset from that baseline
-        int currentOffset = p.advMatrix[matrixEditSelection] - base;
-        
-        // 3. Apply the dial movement
-        int targetOffset = currentOffset + (dir * step);
-        
-        // 4. UX MAGIC: Snap the offset to the nearest clean multiple of 25
-        targetOffset = Math.round((float)targetOffset / step) * step;
-        
-        // 5. Add the baseline back to get the raw hardware number
-        int finalTarget = base + targetOffset;
-        
-        // 6. Clamp to the absolute BIONZ hardware limits so it never crashes
-        if (isDiagonal) {
-            p.advMatrix[matrixEditSelection] = Math.max(-1024, Math.min(2048, finalTarget));
-        } else {
-            p.advMatrix[matrixEditSelection] = Math.max(-1024, Math.min(1024, finalTarget));
+        if (currentHudMode == 0) { // MODE 0: MATRIX MATH
+            int step = 25; 
+            boolean isDiagonal = (hudSelection == 0 || hudSelection == 4 || hudSelection == 8);
+            int base = isDiagonal ? 1024 : 0;
+            int offset = p.advMatrix[hudSelection] - base;
+            int target = Math.round((float)(offset + (dir * step)) / step) * step; // Rubber-band math
+            int finalVal = base + target;
+            p.advMatrix[hudSelection] = Math.max(-1024, Math.min(isDiagonal ? 2048 : 1024, finalVal));
+            
+        } else if (currentHudMode == 1) { // MODE 1: 6-AXIS MATH
+            if (hudSelection == 0) p.colorDepthRed = Math.max(-7, Math.min(7, p.colorDepthRed + dir));
+            else if (hudSelection == 1) p.colorDepthGreen = Math.max(-7, Math.min(7, p.colorDepthGreen + dir));
+            else if (hudSelection == 2) p.colorDepthBlue = Math.max(-7, Math.min(7, p.colorDepthBlue + dir));
+            else if (hudSelection == 3) p.colorDepthCyan = Math.max(-7, Math.min(7, p.colorDepthCyan + dir));
+            else if (hudSelection == 4) p.colorDepthMagenta = Math.max(-7, Math.min(7, p.colorDepthMagenta + dir));
+            else if (hudSelection == 5) p.colorDepthYellow = Math.max(-7, Math.min(7, p.colorDepthYellow + dir));
         }
         
-        updateMatrixOverlayUI();
-        
+        updateHudUI();
         uiHandler.removeCallbacks(applySettingsRunnable); 
         uiHandler.postDelayed(applySettingsRunnable, 150);
     }
@@ -1720,39 +1738,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // --- LIVE MATRIX OVERLAY UI ---
-        matrixOverlayContainer = new LinearLayout(this); 
-        matrixOverlayContainer.setOrientation(LinearLayout.HORIZONTAL); 
-        matrixOverlayContainer.setBackgroundColor(Color.argb(220, 15, 15, 15)); 
-        matrixOverlayContainer.setPadding(10, 15, 10, 15);
-        matrixOverlayContainer.setVisibility(View.GONE);
+        // --- UNIVERSAL HUD OVERLAY UI ---
+        hudOverlayContainer = new LinearLayout(this); 
+        hudOverlayContainer.setOrientation(LinearLayout.HORIZONTAL); 
+        hudOverlayContainer.setBackgroundColor(Color.argb(220, 15, 15, 15)); 
+        hudOverlayContainer.setPadding(10, 15, 10, 15);
+        hudOverlayContainer.setVisibility(View.GONE);
         
-        String[] mLabels = {"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
         for (int i = 0; i < 9; i++) {
-            LinearLayout cell = new LinearLayout(this);
-            cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER);
+            hudCells[i] = new LinearLayout(this);
+            hudCells[i].setOrientation(LinearLayout.VERTICAL);
+            hudCells[i].setGravity(Gravity.CENTER);
             
-            matrixLabels[i] = new TextView(this);
-            matrixLabels[i].setText(mLabels[i]);
-            matrixLabels[i].setTextColor(Color.GRAY);
-            matrixLabels[i].setTextSize(14);
-            matrixLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
+            hudLabels[i] = new TextView(this);
+            hudLabels[i].setTextColor(Color.GRAY);
+            hudLabels[i].setTextSize(14);
+            hudLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             
-            matrixValues[i] = new TextView(this);
-            matrixValues[i].setText("0");
-            matrixValues[i].setTextColor(Color.WHITE);
-            matrixValues[i].setTextSize(18);
-            matrixValues[i].setTypeface(Typeface.DEFAULT_BOLD);
+            hudValues[i] = new TextView(this);
+            hudValues[i].setTextColor(Color.WHITE);
+            hudValues[i].setTextSize(18);
+            hudValues[i].setTypeface(Typeface.DEFAULT_BOLD);
             
-            cell.addView(matrixLabels[i]);
-            cell.addView(matrixValues[i]);
-            matrixOverlayContainer.addView(cell, new LinearLayout.LayoutParams(0, -2, 1.0f));
+            hudCells[i].addView(hudLabels[i]);
+            hudCells[i].addView(hudValues[i]);
+            hudOverlayContainer.addView(hudCells[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
         }
         
         FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
-        overlayParams.setMargins(0, 0, 0, 130); // Sits right above your bottom exposure bar
-        mainUIContainer.addView(matrixOverlayContainer, overlayParams);
+        overlayParams.setMargins(0, 0, 0, 130); 
+        mainUIContainer.addView(hudOverlayContainer, overlayParams);
     }
 
     private TextView createTabHeader(String text) {
