@@ -88,6 +88,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private LinearLayout[] hudCells = new LinearLayout[9];
     private TextView[] hudLabels = new TextView[9];
     private TextView[] hudValues = new TextView[9];
+
+    // --- WB GRID HUD VARIABLES ---
+    private FrameLayout wbGridContainer;
+    private View wbCursor;
+    private TextView wbValueText;
     
     private BatteryView batteryIcon;
     private ImageView playbackImageView;
@@ -616,7 +621,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onUpPressed() {
-        if (isHudActive) { handleHudAdjustment(1); return; }
+        if (isHudActive) {
+            if (currentHudMode == 2) handleWbAdjustment(0, 1); // Up is Green (+1)
+            else handleHudAdjustment(1);
+            return;
+        }
         if (isProcessing || waitingForProfileChoice) return;
         if (isCalibrating) {
             if (calibStep == 2) {
@@ -657,7 +666,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onDownPressed() {
-        if (isHudActive) { handleHudAdjustment(-1); return; }
+        if (isHudActive) {
+            if (currentHudMode == 2) handleWbAdjustment(0, -1); // Down is Magenta (-1)
+            else handleHudAdjustment(-1);
+            return;
+        }
         if (isProcessing) return;
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
@@ -700,8 +713,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override
     public void onLeftPressed() {
         if (isHudActive) {
-            hudSelection = Math.max(0, hudSelection - 1);
-            updateHudUI();
+            if (currentHudMode == 2) handleWbAdjustment(-1, 0); // Left is Blue (-1)
+            else {
+                hudSelection = Math.max(0, hudSelection - 1);
+                updateHudUI();
+            }
             return;
         }
         if (isProcessing) return;
@@ -767,9 +783,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override
     public void onRightPressed() {
         if (isHudActive) {
-            int maxSlots = (currentHudMode == 0) ? 8 : 5; // 9 slots for Matrix, 6 for 6-Axis
-            hudSelection = Math.min(maxSlots, hudSelection + 1);
-            updateHudUI();
+            if (currentHudMode == 2) handleWbAdjustment(1, 0); // Right is Amber (+1)
+            else {
+                int maxSlots = (currentHudMode == 0) ? 8 : 5; 
+                hudSelection = Math.min(maxSlots, hudSelection + 1);
+                updateHudUI();
+            }
             return;
         }
         if (isProcessing) return;
@@ -821,7 +840,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public void onDialRotated(int direction) { 
-        if (isHudActive) { handleHudAdjustment(direction); return; }
+        if (isHudActive) {
+            if (currentHudMode == 2) handleWbAdjustment(direction, 0); // Map Dial to A-B Axis
+            else handleHudAdjustment(direction);
+            return;
+        }
         if (isPlaybackMode) { showPlaybackImage(playbackIndex + direction); } 
         else if (isMenuOpen) {
             if (isNamingMode) { 
@@ -1258,6 +1281,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // --- UNIVERSAL HUD ENGINE ---
     private void updateHudUI() {
         RTLProfile p = recipeManager.getCurrentProfile();
+
+        // --- MODE 2: 2D GRID LOGIC ---
+        if (currentHudMode == 2) {
+            int ab = p.wbShift;   // X-Axis (-7 to +7)
+            int gm = p.wbShiftGM; // Y-Axis (-7 to +7)
+            
+            // Grid is 280px wide. 14 total steps means 20 pixels per step.
+            // Screen Y coordinates go down, so positive GM (Up) means a negative Y translation.
+            wbCursor.setTranslationX(ab * 20);
+            wbCursor.setTranslationY(-gm * 20);
+            
+            String abStr = ab == 0 ? "0" : (ab < 0 ? "B" + Math.abs(ab) : "A" + ab);
+            String gmStr = gm == 0 ? "0" : (gm < 0 ? "M" + Math.abs(gm) : "G" + gm);
+            wbValueText.setText(abStr + ", " + gmStr);
+            return; // Exit here so it doesn't try to draw the normal ribbon
+        }
+
         int activeCells = 0;
         String[] labels = new String[9];
         String[] values = new String[9];
@@ -1300,6 +1340,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    private void handleWbAdjustment(int dAb, int dGm) {
+        RTLProfile p = recipeManager.getCurrentProfile();
+        p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dAb));
+        p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dGm));
+        updateHudUI();
+        uiHandler.removeCallbacks(applySettingsRunnable);
+        uiHandler.postDelayed(applySettingsRunnable, 150);
+    }
+
     private void handleHudAdjustment(int dir) {
         RTLProfile p = recipeManager.getCurrentProfile();
         
@@ -1329,16 +1378,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void launchHudMode(int mode) {
         isHudActive = true;
         currentHudMode = mode;
-        // Default selection logic
-        if (mode == 1) { // 6-Axis
-            hudSelection = Math.max(0, menuSelection - 1);
-        } else {
-            hudSelection = 0; 
-        }
+        if (mode == 1) hudSelection = Math.max(0, menuSelection - 1);
+        else hudSelection = 0; 
+        
         menuContainer.setVisibility(View.GONE);
         mainUIContainer.setVisibility(View.VISIBLE);
         setHUDVisibility(View.GONE); 
-        hudOverlayContainer.setVisibility(View.VISIBLE);
+        
+        // --- ROUTE TO CORRECT OVERLAY ---
+        if (mode == 2) {
+            hudOverlayContainer.setVisibility(View.GONE);
+            wbGridContainer.setVisibility(View.VISIBLE);
+        } else {
+            hudOverlayContainer.setVisibility(View.VISIBLE);
+            wbGridContainer.setVisibility(View.GONE);
+        }
+        
         updateHudUI();
     }
     
@@ -1745,6 +1800,53 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
         overlayParams.setMargins(0, 0, 0, 130); 
         mainUIContainer.addView(hudOverlayContainer, overlayParams);
+
+        // --- WB 2D GRID OVERLAY UI ---
+        wbGridContainer = new FrameLayout(this);
+        wbGridContainer.setBackgroundColor(Color.argb(160, 20, 20, 20));
+        wbGridContainer.setVisibility(View.GONE);
+        
+        // Vertical Axis (G-M)
+        View vAxis = new View(this);
+        vAxis.setBackgroundColor(Color.GRAY);
+        wbGridContainer.addView(vAxis, new FrameLayout.LayoutParams(2, 280, Gravity.CENTER));
+        
+        // Horizontal Axis (A-B)
+        View hAxis = new View(this);
+        hAxis.setBackgroundColor(Color.GRAY);
+        wbGridContainer.addView(hAxis, new FrameLayout.LayoutParams(280, 2, Gravity.CENTER));
+        
+        // Labels
+        TextView lG = new TextView(this); lG.setText("G"); lG.setTextColor(Color.WHITE);
+        wbGridContainer.addView(lG, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        
+        TextView lM = new TextView(this); lM.setText("M"); lM.setTextColor(Color.WHITE);
+        wbGridContainer.addView(lM, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+        
+        TextView lB = new TextView(this); lB.setText("B"); lB.setTextColor(Color.WHITE);
+        FrameLayout.LayoutParams pB = new FrameLayout.LayoutParams(-2, -2, Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        pB.setMargins(10, 0, 0, 0); wbGridContainer.addView(lB, pB);
+        
+        TextView lA = new TextView(this); lA.setText("A"); lA.setTextColor(Color.WHITE);
+        FrameLayout.LayoutParams pA = new FrameLayout.LayoutParams(-2, -2, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        pA.setMargins(0, 0, 10, 0); wbGridContainer.addView(lA, pA);
+        
+        // Live Coordinates Text (e.g., A2, G1)
+        wbValueText = new TextView(this);
+        wbValueText.setTextColor(Color.rgb(230, 50, 15));
+        wbValueText.setTypeface(Typeface.DEFAULT_BOLD);
+        wbValueText.setTextSize(16);
+        FrameLayout.LayoutParams pVal = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
+        pVal.setMargins(0, 10, 15, 0);
+        wbGridContainer.addView(wbValueText, pVal);
+        
+        // The Moving Orange Cursor
+        wbCursor = new View(this);
+        wbCursor.setBackgroundColor(Color.rgb(230, 50, 15));
+        wbGridContainer.addView(wbCursor, new FrameLayout.LayoutParams(14, 14, Gravity.CENTER));
+        
+        // Add the whole 320x320 grid to the absolute center of the screen
+        mainUIContainer.addView(wbGridContainer, new FrameLayout.LayoutParams(320, 320, Gravity.CENTER));
     }
 
     private TextView createTabHeader(String text) {
