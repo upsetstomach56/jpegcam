@@ -1730,6 +1730,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         for (int i = 0; i < itemCount; i++) {
             boolean isActive = true;
             
+            // [DEV FLAG] Page 2: Lock Pro Base to OFF (Consumer ISP bypasses this)
+            // To re-enable testing, simply comment out these two lines:
+            if (currentMainTab == 0 && currentPage == 2 && i == 1) {
+                isActive = false; 
+                p.proColorMode = "off";
+            }
+            
             // Page 3: Effect Tweaker Dependencies
             if (currentMainTab == 0 && currentPage == 3 && i == 1) {
                 String eff = p.pictureEffect != null ? p.pictureEffect : "off";
