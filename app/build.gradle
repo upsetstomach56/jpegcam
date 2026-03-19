@@ -55,6 +55,7 @@ android {
             outputFileName = "filmOS-v${variant.versionName}.apk"
         }
     }
+}
 
 repositories {
     maven { url "https://jitpack.io" }
@@ -63,7 +64,6 @@ repositories {
 }
 
 dependencies {
-    //compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:-SNAPSHOT'
     compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:master-SNAPSHOT'
     
     // ALPHAOS DASHBOARD HTTP SERVER
