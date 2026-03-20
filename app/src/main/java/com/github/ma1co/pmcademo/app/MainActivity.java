@@ -780,16 +780,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { 
+            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
                 currentMainTab = (currentMainTab - 1 + 4) % 4;
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 5; 
-                else if (currentMainTab == 2) currentPage = 6; 
-                else if (currentMainTab == 3) currentPage = 7; 
+                else if (currentMainTab == 1) currentPage = 6; // Shifted from 5
+                else if (currentMainTab == 2) currentPage = 7; // Shifted from 6
+                else if (currentMainTab == 3) currentPage = 8; // Shifted from 7
                 renderMenu();
-            } else if (menuSelection == -1) { 
+            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
                 if (currentMainTab == 0) { 
-                    currentPage = (currentPage - 2 + 4) % 4 + 1;
+                    currentPage = (currentPage - 2 + 5) % 5 + 1; // Tab 0 now has 5 pages!
                     renderMenu();
                 }
             } else if (isNamingMode) {
@@ -843,16 +843,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { 
+            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
                 currentMainTab = (currentMainTab + 1) % 4;
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 5; 
-                else if (currentMainTab == 2) currentPage = 6; 
-                else if (currentMainTab == 3) currentPage = 7; 
+                else if (currentMainTab == 1) currentPage = 6; // Shifted
+                else if (currentMainTab == 2) currentPage = 7; // Shifted
+                else if (currentMainTab == 3) currentPage = 8; // Shifted
                 renderMenu();
-            } else if (menuSelection == -1) { 
+            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
                 if (currentMainTab == 0) { 
-                    currentPage = (currentPage % 4) + 1; 
+                    currentPage = (currentPage % 5) + 1; // Tab 0 now has 5 pages!
                     renderMenu();
                 }
             } else if (isNamingMode) {
@@ -1019,8 +1019,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 // --- FIXED: ADDED FUJI CHROME CONTROLS TO D-PAD LOGIC ---
                 else if (sel == 6) p.colorChrome = Math.max(0, Math.min(2, p.colorChrome + dir));
                 else if (sel == 7) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
+
+                // --- NEW: Analog Physics Controls ---
+                else if (sel == 8) p.shadowToe = (p.shadowToe + dir + 3) % 3;
+                else if (sel == 9) p.subtractiveSat = (p.subtractiveSat + dir + 3) % 3;
+                 else if (sel == 10) p.halation = (p.halation + dir + 3) % 3;
+            } else if (currentPage == 5) { // 5. ANALOG PHYSICS (SW)
+                if (sel == 0) p.shadowToe = Math.max(0, Math.min(2, p.shadowToe + dir));
+                else if (sel == 1) p.subtractiveSat = Math.max(0, Math.min(2, p.subtractiveSat + dir));
+                else if (sel == 2) p.halation = Math.max(0, Math.min(2, p.halation + dir));
             }
-        } else if (currentPage == 5) { // 5. GLOBAL SETTINGS
+        } else if (currentPage == 6) { // 6. GLOBAL SETTINGS (SHIFTED FROM 5)
             if (sel == 0) recipeManager.setQualityIndex(Math.max(0, Math.min(2, recipeManager.getQualityIndex() + dir)));
             else if (sel == 2) prefShowFocusMeter = !prefShowFocusMeter;
             else if (sel == 3) prefShowCinemaMattes = !prefShowCinemaMattes;
@@ -1611,14 +1620,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (currentPage == 1) tvMenuSubtitle.setText("1. Recipe Identity & Base [HW]");
         else if (currentPage == 2) tvMenuSubtitle.setText("2. Advanced Color Engine [HW]");
         else if (currentPage == 3) tvMenuSubtitle.setText("3. Effects & Shading [HW]");
-        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW] - ADDS PROCESSING TIME!");
-        else if (currentPage == 5) tvMenuSubtitle.setText("Global Settings");
-        else if (currentPage == 6) tvMenuSubtitle.setText("Web Dashboard Server");
-        else if (currentPage == 7) tvMenuSubtitle.setText("Resources & Community");
+        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW]");
+        else if (currentPage == 5) tvMenuSubtitle.setText("5. Analog Physics [SW]"); // NEW
+        else if (currentPage == 6) tvMenuSubtitle.setText("Global Settings"); // Shifted
+        else if (currentPage == 7) tvMenuSubtitle.setText("Web Dashboard Server"); // Shifted
+        else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community"); // Shifted
 
         for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
         if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE);
-        if (currentPage == 7) { supportTabContainer.setVisibility(View.VISIBLE); currentItemCount = 0; return; }
+        if (currentPage == 8) { supportTabContainer.setVisibility(View.VISIBLE); currentItemCount = 0; return; }
 
         RTLProfile p = recipeManager.getCurrentProfile();
         int itemCount = 0;
@@ -1727,14 +1737,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     menuValues[i].setText(rValues[i]); 
                     menuRows[i].setVisibility(View.VISIBLE); 
                 }
+            } else if (currentPage == 5) {
+                itemCount = 3; 
+                
+                String toeStr = p.shadowToe == 0 ? "OFF" : (p.shadowToe == 1 ? "WEAK" : "FILMIC");
+                String satStr = p.subtractiveSat == 0 ? "OFF" : (p.subtractiveSat == 1 ? "WEAK" : "HEAVY");
+                String haloStr = p.halation == 0 ? "OFF" : (p.halation == 1 ? "WEAK" : "STRONG");
+
+                String[] rLabels = {"Shadow Roll-Off (Toe)", "Subtractive Saturation", "Halation (Red Glow)"};
+                String[] rValues = {toeStr, satStr, haloStr};
+                
+                for (int i = 0; i < 3; i++) { 
+                    menuLabels[i].setText(rLabels[i]); 
+                    menuValues[i].setText(rValues[i]); 
+                    menuRows[i].setVisibility(View.VISIBLE); 
+                }
             }
-        } else if (currentPage == 5) {
+        } else if (currentPage == 6) {
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
             String[] gLabels = {"SW Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "SW JPEG Quality"};
             String[] gValues = { qLabels[recipeManager.getQualityIndex()], scn, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF", String.valueOf(prefJpegQuality) };
             for (int i = 0; i < 6; i++) { menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
-        } else if (currentPage == 6) {
+        } else if (currentPage == 7) {
             itemCount = 3;
             String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
             String[] cValues = { hotspotStatus, wifiStatus, "" };

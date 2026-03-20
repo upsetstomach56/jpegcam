@@ -48,6 +48,11 @@ public class RTLProfile {
     public int colorChrome = 0; 
     public int chromeBlue = 0;
 
+    // --- NEW: Analog Physics Controls ---
+    public int shadowToe = 1;        // 0=OFF, 1=NORMAL, 2=FILMIC
+    public int subtractiveSat = 1;   // 0=OFF, 1=WEAK, 2=HEAVY
+    public int halation = 0;         // 0=OFF, 1=WEAK, 2=STRONG
+
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
     }

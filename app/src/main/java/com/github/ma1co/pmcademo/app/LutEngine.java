@@ -9,7 +9,7 @@ public class LutEngine {
     private native boolean loadLutNative(String filePath);
     
     // --- UPDATED: Added colorChrome and chromeBlue to match C++ signature ---
-    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff, int colorChrome, int chromeBlue, int jpegQuality);
+    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff, int colorChrome, int chromeBlue, int shadowToe, int subtractiveSat, int halation, int jpegQuality);
 
     public boolean loadLut(File cubeFile, String lutName) {
         if (lutName.equals(currentLutName)) return true;
@@ -20,7 +20,7 @@ public class LutEngine {
     }
 
     // --- UPDATED: Added colorChrome and chromeBlue here as well ---
-    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff, int colorChrome, int chromeBlue, int jpegQuality) {
-        return processImageNative(inPath, outPath, scaleDenom, opacity, grain, grainSize, vignette, rollOff, colorChrome, chromeBlue, jpegQuality);
+    public boolean applyLutToJpeg(String in, String out, int scale, int opacity, int grain, int grainSize, int vignette, int rollOff, int colorChrome, int chromeBlue, int shadowToe, int subtractiveSat, int halation, int quality) {
+        return processImageNative(in, out, scale, opacity, grain, grainSize, vignette, rollOff, colorChrome, chromeBlue, shadowToe, subtractiveSat, halation, quality);
     }
 }

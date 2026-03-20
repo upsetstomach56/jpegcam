@@ -93,9 +93,9 @@ public class ImageProcessor {
                 }
 
                 // --- FIXED: Passing the 2 new variables (p.colorChrome and p.chromeBlue) ---
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, p.colorChrome, p.chromeBlue, jpegQuality)) {
-                    return "SAVED";
-                }
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat, p.halation, jpegQuality)) {
+        return "SAVED";
+    }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
             return "FAILED";
         }

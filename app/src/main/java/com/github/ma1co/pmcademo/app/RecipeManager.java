@@ -137,6 +137,11 @@ public class RecipeManager {
                   // --- NEW: Fuji Chrome Effects ---
                   .append(p.colorChrome).append(",") // 26
                   .append(p.chromeBlue).append("\n"); // 27
+
+                  // --- NEW: Analog Physics ---
+                  .append(p.shadowToe).append(",") // 28
+                  .append(p.subtractiveSat).append(",") // 29
+                  .append(p.halation).append("\n"); // 30
             }
             fos.write(sb.toString().getBytes()); 
             fos.flush(); 
@@ -228,6 +233,13 @@ public class RecipeManager {
                             if (parts.length >= 28) {
                                 p.colorChrome = Integer.parseInt(parts[26]);
                                 p.chromeBlue = Integer.parseInt(parts[27]);
+                            }
+
+                            // --- NEW: Analog Physics ---
+                            if (parts.length >= 31) {
+                                p.shadowToe = Integer.parseInt(parts[28]);
+                                p.subtractiveSat = Integer.parseInt(parts[29]);
+                                p.halation = Integer.parseInt(parts[30]);
                             }
                         }
                     }

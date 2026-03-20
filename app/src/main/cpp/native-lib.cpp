@@ -34,7 +34,6 @@ long long get_time_ms() {
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
-    // --- FIXED: DESTROY OLD LUT IMMEDIATELY ---
     nativeLut.clear(); 
     nativeLutSize = 0;
 
@@ -62,7 +61,8 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
     jint scaleDenom, jint opacity, jint grain, jint grainSize, 
-    jint vignette, jint rollOff, jint colorChrome, jint chromeBlue, jint jpegQuality) {
+    jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
+    jint shadowToe, jint subtractiveSat, jint halation, jint jpegQuality) { // 14 Args Total
     
     long long start_time = get_time_ms();
     
@@ -85,34 +85,22 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     unsigned char* header = (unsigned char*)malloc(1048576); 
     if (header) {
         int readLen = fread(header, 1, 1048576, infile);
-        
         for (int i = 0; i < readLen - 8; i++) {
             if (header[i] == 0xFF && header[i+1] == 0xE1) {
                 if (header[i+4] == 'E' && header[i+5] == 'x' && header[i+6] == 'i' && header[i+7] == 'f') {
                     int len = (header[i+2] << 8) | header[i+3];
-                    if (i + 2 + len <= readLen) {
-                        exifData.assign(header + i + 4, header + i + 2 + len);
-                    }
+                    if (i + 2 + len <= readLen) exifData.assign(header + i + 4, header + i + 2 + len);
                     break; 
                 }
             }
         }
-
         if (scaleDenom == 4) {
             for (int i = 1000; i < readLen - 10; i++) {
                 if (header[i] == 0xFF && header[i+1] == 0xD8) {
                     for (int j = i + 2; j < i + 65536 && j < readLen - 10; j++) {
                         if (header[j] == 0xFF && header[j+1] == 0xC0) {
-                            int height = (header[j+5] << 8) | header[j+6];
-                            int width  = (header[j+7] << 8) | header[j+8];
-                            
-                            if (width >= 1000 && width <= 2000) { 
-                                targetOffset = i;
-                                finalScale = 1; 
-                                LOGD("Sniper locked on proxy at offset %d: %dx%d", i, width, height);
-                                break;
-                            }
-                            break;
+                            int width = (header[j+7] << 8) | header[j+8];
+                            if (width >= 1000 && width <= 2000) { targetOffset = i; finalScale = 1; break; }
                         }
                     }
                 }
@@ -122,9 +110,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         free(header);
     }
 
-    // --- 2. THE FORK IN THE ROAD (RGB vs YUV Expressway) ---
+    // --- 2. DECOMPRESSOR SETUP ---
     bool use_rgb_path = (nativeLutSize > 0 && opacity > 0);
-
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
@@ -134,44 +121,31 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_create_decompress(&cinfo_d); 
 
     bool decoded = false;
-
     if (scaleDenom == 4 && targetOffset > 0) {
         fseek(infile, targetOffset, SEEK_SET);
-        if (setjmp(jerr_d.setjmp_buffer)) {
-            jpeg_abort_decompress(&cinfo_d); 
-            decoded = false; 
-        } else {
+        if (!setjmp(jerr_d.setjmp_buffer)) {
             jpeg_stdio_src(&cinfo_d, infile);
             jpeg_read_header(&cinfo_d, TRUE); 
-            cinfo_d.scale_num = 1;
-            cinfo_d.scale_denom = 1; 
+            cinfo_d.scale_num = 1; cinfo_d.scale_denom = 1; 
             cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr; 
             jpeg_start_decompress(&cinfo_d);
             decoded = true;
         }
     }
-
     if (!decoded) {
         fseek(infile, 0, SEEK_SET);
-        if (setjmp(jerr_d.setjmp_buffer)) { 
-            jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; 
-        }
+        if (setjmp(jerr_d.setjmp_buffer)) { jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; }
         jpeg_stdio_src(&cinfo_d, infile);
         jpeg_read_header(&cinfo_d, TRUE); 
-        cinfo_d.scale_num = 1;
-        cinfo_d.scale_denom = (scaleDenom == 4) ? 4 : scaleDenom; 
+        cinfo_d.scale_num = 1; cinfo_d.scale_denom = (scaleDenom == 4) ? 4 : scaleDenom; 
         cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr; 
         jpeg_start_decompress(&cinfo_d);
     }
 
-    LOGD("Decompressor Ready. Path: %s. Dimensions: %d x %d", use_rgb_path ? "RGB" : "YUV", cinfo_d.output_width, cinfo_d.output_height);
-
+    // --- 3. COMPRESSOR SETUP ---
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
     jerr_c.pub.error_exit = my_error_exit;
-    if (setjmp(jerr_c.setjmp_buffer)) { 
-        jpeg_destroy_compress(&cinfo_c); jpeg_destroy_decompress(&cinfo_d); 
-        fclose(infile); fclose(outfile); return JNI_FALSE; 
-    }
+    if (setjmp(jerr_c.setjmp_buffer)) { jpeg_destroy_compress(&cinfo_c); jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; }
     
     jpeg_create_compress(&cinfo_c); 
     jpeg_stdio_dest(&cinfo_c, outfile);
@@ -183,11 +157,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_set_quality(&cinfo_c, jpegQuality, TRUE); 
     jpeg_start_compress(&cinfo_c, TRUE);
 
-    if (!exifData.empty()) {
-        jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
-    }
+    if (!exifData.empty()) jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
 
-    // --- 3. PRE-CALCULATIONS FOR BOTH PATHS ---
+    // --- 4. ASSETS & LUT PRE-CALCS ---
     int row_stride = cinfo_d.output_width * 3;
     long long cx = cinfo_d.output_width / 2; 
     long long cy_center = cinfo_d.output_height / 2;
@@ -199,47 +171,39 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JSAMPROW row_pointer[1];
     uint32_t master_seed = 98765;
 
-    // Path A Assets (RGB)
     int map[256]; 
-    int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
+    int lutMax = nativeLutSize - 1; 
     int lutSize2 = nativeLutSize * nativeLutSize;
     if (use_rgb_path) {
-        for (int i = 0; i < 256; i++) { map[i] = lutMax > 0 ? (i * lutMax * 128) / 255 : 0; }
+        for (int i = 0; i < 256; i++) { map[i] = (i * lutMax * 128) / 255; }
     }
 
-    // Path B Assets (YUV Expressway)
-    int8_t noise_pool[65536];
     uint8_t rolloff_lut[256];
     if (!use_rgb_path) {
-        uint32_t setup_seed = 12345;
-        for (int i = 0; i < 65536; i++) {
-            // Bell curve approximation via 3 random distributions
-            int n = (fast_rand(&setup_seed) & 0xFF) + (fast_rand(&setup_seed) & 0xFF) + (fast_rand(&setup_seed) & 0xFF);
-            noise_pool[i] = (int8_t)((n / 3) - 128);
-        }
         for (int i = 0; i < 256; i++) {
             int r_t = (i > 200) ? i - ((i - 200) * (i - 200) * rollOff) / 11000 : i;
             rolloff_lut[i] = (uint8_t)(r_t < 0 ? 0 : (r_t > 255 ? 255 : r_t));
         }
     }
 
-    // --- 4. PROCESSING LOOP ---
+    // --- 5. MAIN PROCESSING LOOP ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
 
+        uint32_t seed = master_seed + (abs_y * 1337); 
+        int prev_noise = 0; 
+
         if (use_rgb_path) {
             // ==========================================
-            // PATH A: TRADITIONAL RGB + 3D LUT
+            // PATH A: RGB + LUT + ANALOG PHYSICS
             // ==========================================
-            uint32_t seed = master_seed + (abs_y * 1337); 
-            int prev_noise = 0; 
-
             for (int x = 0; x < row_stride; x += 3) {
                 int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
                 int outR = r, outG = g, outB = b;
 
+                // 1. LUT INTERPOLATION
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
                 int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -263,143 +227,87 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 int lR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
                 int lG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
                 int lB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
-                
                 outR = r + (((lR - r) * opac_mapped) >> 8);
                 outG = g + (((lG - g) * opac_mapped) >> 8);
                 outB = b + (((lB - b) * opac_mapped) >> 8);
-                
-                // --- FIXED: RGB CHROMA SCALER ---
-                if (rollOff > 0) {
-                    // 1. Find the brightest channel in the pixel
-                    int maxC = outR > outG ? (outR > outB ? outR : outB) : (outG > outB ? outG : outB);
-                    
-                    if (maxC > 200) {
-                        // 2. Apply the film shoulder curve ONLY to the brightest channel
-                        int targetMax = maxC - ((maxC - 200) * (maxC - 200) * rollOff) / 11000;
-                        if (targetMax < 0) targetMax = 0;
-                        
-                        // 3. Create a multiplier ratio to scale everything equally
-                        int ratio_256 = (targetMax * 256) / maxC;
-                        
-                        // 4. Scale all channels to preserve the exact hue of the LUT!
-                        outR = (outR * ratio_256) >> 8;
-                        outG = (outG * ratio_256) >> 8;
-                        outB = (outB * ratio_256) >> 8;
-                    }
+
+                // --- NEW PHYSICS ---
+                int currentY = (outR*77 + outG*150 + outB*29) >> 8;
+                int targetY = currentY;
+                if (shadowToe > 0) {
+                    int lift = (shadowToe == 1) ? 35 : 55;
+                    if (targetY < lift) targetY += ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
                 }
+                if (rollOff > 0 && targetY > 200) targetY -= ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
+                
+                int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
+                int cr_p = ((112 * outR - 94 * outG - 18 * outB) >> 8);
+                int sat_p = (cb_p < 0 ? -cb_p : cb_p) + (cr_p < 0 ? -cr_p : cr_p);
+                if (colorChrome > 0 && targetY > 60 && sat_p > 30) targetY -= (sat_p * colorChrome * targetY) >> 15;
+                if (chromeBlue > 0 && cb_p > 15 && targetY > 80) targetY -= (cb_p * chromeBlue) >> 2;
+                if (subtractiveSat > 0 && sat_p > 20) targetY -= (sat_p >> (6 - subtractiveSat));
+                if (targetY < 10) targetY = 10;
+
+                if (targetY != currentY) {
+                    int r256 = (targetY * 256) / (currentY == 0 ? 1 : currentY);
+                    outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
+                }
+                if (halation > 0 && targetY > 230) outR = (outR * (256 + (halation * 20))) >> 8;
+
                 if (vignette > 0) {
                     long long d_sq = ((long long)(x/3)-cx)*((long long)(x/3)-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
                     int v_m = 256 - (int)((d_sq * vig_coef) >> 24); if (v_m < 0) v_m = 0;
                     outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
                 }
                 if (grain > 0) {
-                    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-                    int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
-                    int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                    int mask = (lum < 128) ? lum : 255 - lum; 
-                    if (lum < 64) mask = (mask * lum) >> 6;
-                    int gv = (noise * mask * grain) >> 15; 
-                    outR += gv; outG += gv; outB += gv;
-                    prev_noise = raw_noise;
+                    int rn = (fast_rand(&seed) & 0xFF) - 128;
+                    int n = (grainSize == 0) ? rn : (grainSize == 1) ? (rn + prev_noise) >> 1 : (rn + prev_noise * 2) / 3;
+                    int m = (targetY < 128) ? targetY : 255 - targetY; if (targetY < 64) m = (m * targetY) >> 6;
+                    int gv = (n * m * grain) >> 15; outR += gv; outG += gv; outB += gv; prev_noise = rn;
                 }
-                row_buf[x] = (unsigned char)(outR<0?0:outR>255?255:outR);
-                row_buf[x+1] = (unsigned char)(outG<0?0:outG>255?255:outG);
-                row_buf[x+2] = (unsigned char)(outB<0?0:outB>255?255:outB);
+                row_buf[x] = (uint8_t)CLAMP(outR); row_buf[x+1] = (uint8_t)CLAMP(outG); row_buf[x+2] = (uint8_t)CLAMP(outB);
             }
         } else {
             // ==========================================
-            // PATH B: THE YUV EXPRESSWAY (Luminance Only)
+            // PATH B: THE YUV EXPRESSWAY
             // ==========================================
-            uint32_t seed = master_seed + (abs_y * 1337); // RESTORED: Your random seed logic
-            int prev_noise = 0;                           // RESTORED: Your moving average memory
-            long long d_sq_y = (long long)(abs_y - cy_center) * (abs_y - cy_center);
-            
             for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
-                int oldY = row_buf[x];
-                int outY = oldY;
-                
-                // 1. 1D LUT Highlight Roll-Off
-                if (rollOff > 0) {
-                    outY = rolloff_lut[outY];
+                int oldY = row_buf[x], outY = oldY;
+                if (shadowToe > 0) {
+                    int lift = (shadowToe == 1) ? 35 : 55;
+                    if (outY < lift) outY += ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
                 }
-                
-                // 2. Vignette (Darken Y)
+                if (rollOff > 0) outY = rolloff_lut[outY];
                 if (vignette > 0) {
-                    long long d_sq = ((long long)px - cx) * ((long long)px - cx) + d_sq_y;
-                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
-                    if (v_m < 0) v_m = 0;
-                    
-                    outY = (outY * v_m) >> 8;
+                    long long d_sq = ((long long)px - cx) * ((long long)px - cx) + (long long)(abs_y - cy_center) * (abs_y - cy_center);
+                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); outY = (outY * (v_m < 0 ? 0 : v_m)) >> 8;
                 }
+                int cb = row_buf[x+1] - 128, cr = row_buf[x+2] - 128;
+                int sat = (cb < 0 ? -cb : cb) + (cr < 0 ? -cr : cr);
+                if (colorChrome > 0 && outY > 60 && sat > 30) outY -= (sat * colorChrome * outY) >> 15;
+                if (chromeBlue > 0 && cb > 15 && outY > 80) { outY -= (cb * chromeBlue) >> 2; cr -= (cb * chromeBlue) >> 4; }
+                if (subtractiveSat > 0 && sat > 20) outY -= (sat >> (6 - subtractiveSat));
+                if (halation > 0 && outY > 235) cr += (halation == 1 ? 30 : 60);
+                if (outY < 8) outY = 8;
 
-                // --- NEW: FUJI COLOR SCIENCE (Aggressive High-Oomph Version) ---
-                int cb = row_buf[x+1] - 128;
-                int cr = row_buf[x+2] - 128;
-
-                // Fuji "Color Chrome" (Crushes luminance of saturated reds/yellows)
-                if (colorChrome > 0) {
-                    int saturation = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr); 
-                    if (outY > 110 && saturation > 30) { // Trigger earlier in the brightness curve
-                        int drop = (saturation * colorChrome) >> 1; // Double the darkening power
-                        outY -= drop;
-                        if (outY < 0) outY = 0;
-                    }
-                }
-                
-                // Fuji "Chrome FX Blue" (Dramatically deepens blue skies)
-                if (chromeBlue > 0) {
-                    if (outY > 90 && cb > 15 && cr < 20) { // Broad sky detection
-                        outY -= (cb * chromeBlue); // Subtract blue-power directly from brightness
-                        if (outY < 0) outY = 0;
-                        cb += (cb * chromeBlue) >> 1; // Boost the blue saturation
-                    }
-                }
-
-                // Final Chroma Scaler (Preserves Hues if Roll-off or Chrome darkened the image)
                 if (oldY != outY) {
-                    int ratio_256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
-                    cb = (cb * ratio_256) >> 8;
-                    cr = (cr * ratio_256) >> 8;
+                    int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
+                    cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
                 }
-                
-                // Safely clamp and save colors
-                int finalCb = 128 + cb;
-                int finalCr = 128 + cr;
-                row_buf[x+1] = (unsigned char)(finalCb < 0 ? 0 : (finalCb > 255 ? 255 : finalCb));
-                row_buf[x+2] = (unsigned char)(finalCr < 0 ? 0 : (finalCr > 255 ? 255 : finalCr));
-                
-                // 3. RESTORED: YOUR PROVEN ORGANIC GRAIN ALGORITHM
+                row_buf[x+1] = (uint8_t)CLAMP(128+cb); row_buf[x+2] = (uint8_t)CLAMP(128+cr);
                 if (grain > 0) {
-                    // Generate noise the original way
-                    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-                    
-                    // Your original moving average (kills pixelation, adds organic clumps)
-                    int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
-                    
-                    // Your original luminance mask
-                    int mask = (outY < 128) ? outY : 255 - outY; 
-                    if (outY < 64) mask = (mask * outY) >> 6;
-                    
-                    int gv = (noise * mask * grain) >> 15; 
-                    outY += gv;
-                    prev_noise = raw_noise;
+                    int rn = (fast_rand(&seed) & 0xFF) - 128;
+                    int n = (grainSize == 0) ? rn : (grainSize == 1) ? (rn + prev_noise) >> 1 : (rn + prev_noise * 2) / 3;
+                    int m = (outY < 128) ? outY : 255 - outY; outY += (n * m * grain) >> 15; prev_noise = rn;
                 }
-                
-                // Write only the Y channel (Cb and Cr pass through untouched if no vignette)
-                row_buf[x] = (unsigned char)(outY < 0 ? 0 : (outY > 255 ? 255 : outY));
+                row_buf[x] = (uint8_t)CLAMP(outY);
             }
         }
-        
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
     }
     
     free(row_buf); jpeg_finish_compress(&cinfo_c); jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
-    fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); 
-    env->ReleaseStringUTFChars(outPath, out_file); 
-
-    long long end_time = get_time_ms();
-    LOGD("Native processing finished. Path: %s. Total time: %lld ms", use_rgb_path ? "RGB" : "YUV", (end_time - start_time));
-
+    fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file); 
     return JNI_TRUE;
 }
