@@ -119,6 +119,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         free(header);
     }
 
+    // --- 2. THE FORK IN THE ROAD (RGB vs YUV Expressway) ---
+    bool use_rgb_path = (nativeLutSize > 0 && opacity > 0);
+
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
     struct my_error_mgr jerr_d, jerr_c;
@@ -129,7 +132,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     bool decoded = false;
 
-    // --- 2. THUMBNAIL RIPPING & SAFETY NET ---
     if (scaleDenom == 4 && targetOffset > 0) {
         fseek(infile, targetOffset, SEEK_SET);
         if (setjmp(jerr_d.setjmp_buffer)) {
@@ -140,7 +142,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             jpeg_read_header(&cinfo_d, TRUE); 
             cinfo_d.scale_num = 1;
             cinfo_d.scale_denom = 1; 
-            cinfo_d.out_color_space = JCS_RGB; 
+            cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr; 
             jpeg_start_decompress(&cinfo_d);
             decoded = true;
         }
@@ -155,11 +157,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         jpeg_read_header(&cinfo_d, TRUE); 
         cinfo_d.scale_num = 1;
         cinfo_d.scale_denom = (scaleDenom == 4) ? 4 : scaleDenom; 
-        cinfo_d.out_color_space = JCS_RGB; 
+        cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr; 
         jpeg_start_decompress(&cinfo_d);
     }
 
-    LOGD("Decompressor Ready. Target Dimensions: %d x %d", cinfo_d.output_width, cinfo_d.output_height);
+    LOGD("Decompressor Ready. Path: %s. Dimensions: %d x %d", use_rgb_path ? "RGB" : "YUV", cinfo_d.output_width, cinfo_d.output_height);
 
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
     jerr_c.pub.error_exit = my_error_exit;
@@ -173,22 +175,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.image_width = cinfo_d.output_width; 
     cinfo_c.image_height = cinfo_d.output_height; 
     cinfo_c.input_components = 3; 
-    cinfo_c.in_color_space = JCS_RGB;
+    cinfo_c.in_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr;
     jpeg_set_defaults(&cinfo_c); 
     jpeg_set_quality(&cinfo_c, jpegQuality, TRUE); 
-    
     jpeg_start_compress(&cinfo_c, TRUE);
 
-    // --- 3. EXIF INJECTION ---
     if (!exifData.empty()) {
         jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
     }
 
-    int map[256]; 
-    int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
-    int lutSize2 = nativeLutSize * nativeLutSize;
-    for (int i = 0; i < 256; i++) { map[i] = lutMax > 0 ? (i * lutMax * 128) / 255 : 0; }
-    
+    // --- 3. PRE-CALCULATIONS FOR BOTH PATHS ---
     int row_stride = cinfo_d.output_width * 3;
     long long cx = cinfo_d.output_width / 2; 
     long long cy_center = cinfo_d.output_height / 2;
@@ -200,19 +196,47 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JSAMPROW row_pointer[1];
     uint32_t master_seed = 98765;
 
-    // --- 4. PROCESSING LOOP (SCALAR O3) ---
+    // Path A Assets (RGB)
+    int map[256]; 
+    int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
+    int lutSize2 = nativeLutSize * nativeLutSize;
+    if (use_rgb_path) {
+        for (int i = 0; i < 256; i++) { map[i] = lutMax > 0 ? (i * lutMax * 128) / 255 : 0; }
+    }
+
+    // Path B Assets (YUV Expressway)
+    int8_t noise_pool[65536];
+    uint8_t rolloff_lut[256];
+    if (!use_rgb_path) {
+        uint32_t setup_seed = 12345;
+        for (int i = 0; i < 65536; i++) {
+            // Bell curve approximation via 3 random distributions
+            int n = (fast_rand(&setup_seed) & 0xFF) + (fast_rand(&setup_seed) & 0xFF) + (fast_rand(&setup_seed) & 0xFF);
+            noise_pool[i] = (int8_t)((n / 3) - 128);
+        }
+        for (int i = 0; i < 256; i++) {
+            int r_t = (i > 200) ? i - ((i - 200) * (i - 200) * rollOff) / 11000 : i;
+            rolloff_lut[i] = (uint8_t)(r_t < 0 ? 0 : (r_t > 255 ? 255 : r_t));
+        }
+    }
+
+    // --- 4. PROCESSING LOOP ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-        uint32_t seed = master_seed + (abs_y * 1337); 
-        int prev_noise = 0; 
 
-        for (int x = 0; x < row_stride; x += 3) {
-            int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
-            int outR = r, outG = g, outB = b;
+        if (use_rgb_path) {
+            // ==========================================
+            // PATH A: TRADITIONAL RGB + 3D LUT
+            // ==========================================
+            uint32_t seed = master_seed + (abs_y * 1337); 
+            int prev_noise = 0; 
 
-            if (nativeLutSize > 0) {
+            for (int x = 0; x < row_stride; x += 3) {
+                int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
+                int outR = r, outG = g, outB = b;
+
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
                 int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -236,35 +260,85 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 int lR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
                 int lG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
                 int lB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
+                
                 outR = r + (((lR - r) * opac_mapped) >> 8);
                 outG = g + (((lG - g) * opac_mapped) >> 8);
                 outB = b + (((lB - b) * opac_mapped) >> 8);
+                
+                if (rollOff > 0) { 
+                    int r_t = (outR > 200) ? outR - ((outR - 200) * (outR - 200) * rollOff) / 11000 : outR;
+                    int g_t = (outG > 200) ? outG - ((outG - 200) * (outG - 200) * rollOff) / 11000 : outG;
+                    int b_t = (outB > 200) ? outB - ((outB - 200) * (outB - 200) * rollOff) / 11000 : outB;
+                    outR = r_t < 0 ? 0 : r_t; outG = g_t < 0 ? 0 : g_t; outB = b_t < 0 ? 0 : b_t;
+                }
+                if (vignette > 0) {
+                    long long d_sq = ((long long)(x/3)-cx)*((long long)(x/3)-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
+                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); if (v_m < 0) v_m = 0;
+                    outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
+                }
+                if (grain > 0) {
+                    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+                    int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                    int lum = (outR*77 + outG*150 + outB*29) >> 8; 
+                    int mask = (lum < 128) ? lum : 255 - lum; 
+                    if (lum < 64) mask = (mask * lum) >> 6;
+                    int gv = (noise * mask * grain) >> 15; 
+                    outR += gv; outG += gv; outB += gv;
+                    prev_noise = raw_noise;
+                }
+                row_buf[x] = (unsigned char)(outR<0?0:outR>255?255:outR);
+                row_buf[x+1] = (unsigned char)(outG<0?0:outG>255?255:outG);
+                row_buf[x+2] = (unsigned char)(outB<0?0:outB>255?255:outB);
             }
-            if (rollOff > 0) { 
-                int r_t = (outR > 200) ? outR - ((outR - 200) * (outR - 200) * rollOff) / 11000 : outR;
-                int g_t = (outG > 200) ? outG - ((outG - 200) * (outG - 200) * rollOff) / 11000 : outG;
-                int b_t = (outB > 200) ? outB - ((outB - 200) * (outB - 200) * rollOff) / 11000 : outB;
-                outR = r_t < 0 ? 0 : r_t; outG = g_t < 0 ? 0 : g_t; outB = b_t < 0 ? 0 : b_t;
+        } else {
+            // ==========================================
+            // PATH B: THE YUV EXPRESSWAY (Luminance Only)
+            // ==========================================
+            int mod_y = abs_y >> grainSize;
+            long long d_sq_y = (long long)(abs_y - cy_center) * (abs_y - cy_center);
+            
+            for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
+                int outY = row_buf[x];
+                
+                // 1. 1D LUT Highlight Roll-Off
+                if (rollOff > 0) {
+                    outY = rolloff_lut[outY];
+                }
+                
+                // 2. Vignette (Darken Y, Neutralize Cb/Cr)
+                if (vignette > 0) {
+                    long long d_sq = ((long long)px - cx) * ((long long)px - cx) + d_sq_y;
+                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
+                    if (v_m < 0) v_m = 0;
+                    
+                    outY = (outY * v_m) >> 8;
+                    
+                    // Neutralize color towards 128 (Gray) so corners don't turn radioactive
+                    int cb = row_buf[x+1] - 128;
+                    int cr = row_buf[x+2] - 128;
+                    row_buf[x+1] = (unsigned char)(128 + ((cb * v_m) >> 8));
+                    row_buf[x+2] = (unsigned char)(128 + ((cr * v_m) >> 8));
+                }
+                
+                // 3. Fast Spatially Hashed Organic Grain
+                if (grain > 0) {
+                    int mod_x = px >> grainSize;
+                    
+                    // Prime-number Bitwise Hash: Seamless, 0-latency pseudo-random indexing
+                    int hash_index = (mod_x * 73856093 ^ mod_y * 19349663) & 65535;
+                    int raw_grain = noise_pool[hash_index];
+                    
+                    // Parabolic mask: Peaks at ~254 at value 128. Clamps at pure 0 and 255.
+                    int lum_mask = (outY * (255 - outY)) >> 6; 
+                    
+                    outY += ((raw_grain * lum_mask * grain) >> 15);
+                }
+                
+                // Write only the Y channel (Cb and Cr pass through untouched if no vignette)
+                row_buf[x] = (unsigned char)(outY < 0 ? 0 : (outY > 255 ? 255 : outY));
             }
-            if (vignette > 0) {
-                long long d_sq = ((long long)(x/3)-cx)*((long long)(x/3)-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
-                int v_m = 256 - (int)((d_sq * vig_coef) >> 24); if (v_m < 0) v_m = 0;
-                outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
-            }
-            if (grain > 0) {
-                int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-                int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
-                int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                int mask = (lum < 128) ? lum : 255 - lum; 
-                if (lum < 64) mask = (mask * lum) >> 6;
-                int gv = (noise * mask * grain) >> 15; 
-                outR += gv; outG += gv; outB += gv;
-                prev_noise = raw_noise;
-            }
-            row_buf[x] = (unsigned char)(outR<0?0:outR>255?255:outR);
-            row_buf[x+1] = (unsigned char)(outG<0?0:outG>255?255:outG);
-            row_buf[x+2] = (unsigned char)(outB<0?0:outB>255?255:outB);
         }
+        
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
     }
     
@@ -274,7 +348,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     env->ReleaseStringUTFChars(outPath, out_file); 
 
     long long end_time = get_time_ms();
-    LOGD("Native processing finished. Total time: %lld ms", (end_time - start_time));
+    LOGD("Native processing finished. Path: %s. Total time: %lld ms", use_rgb_path ? "RGB" : "YUV", (end_time - start_time));
 
     return JNI_TRUE;
+}
 }
