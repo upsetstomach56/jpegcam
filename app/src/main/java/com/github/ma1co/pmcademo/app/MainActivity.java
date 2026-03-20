@@ -265,7 +265,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         // --- NEW: Load the custom font safely into memory ---
         try {
-            digitalFont = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIT.TTF");
+            digitalFont = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB.TTF");
         } catch (Exception e) {
             Log.e("filmOS", "Could not load custom font. Did you add it to assets/fonts/?");
             digitalFont = null;
