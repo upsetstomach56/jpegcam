@@ -305,34 +305,32 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             }
         } // <--- This is the closing bracket of Path B (the `else` block)
 
-        // --- 6. TRUE HALATION (Pro-Grade "Shadow Catch" Bleed) ---
+        // --- 6. TRUE HALATION (Organic Additive Light Bleed) ---
         if (halation > 0) {
             int halo_energy = 0;
-            int halo_decay = 210; // ~82% retention per pixel for a wide, cinematic smear
-            int charge_power = (halation == 1) ? 70 : 140; // Max stored light energy
+            // WEAK = Short tight glow (190), STRONG = Long cinematic smear (220)
+            int halo_decay = (halation == 1) ? 190 : 220; 
+            int charge_power = (halation == 1) ? 50 : 90; // Intensity of the red light
 
             // Pass 1: Left-to-Right Smear
             for (int x = 0; x < row_stride; x += 3) {
                 int y_est = use_rgb_path ? ((row_buf[x]*77 + row_buf[x+1]*150 + row_buf[x+2]*29) >> 8) : row_buf[x];
                 
-                if (y_est > 240) { 
-                    // 1. We hit a blown-out core. Charge the battery!
+                if (y_est > 235) { 
+                    // Hit a bright core: Charge the light energy
                     halo_energy = charge_power; 
                 } else if (halo_energy > 0) { 
-                    // 2. MAGIC KEY: Darker pixels catch more glow. White pixels hide the glow.
-                    int catch_rate = 255 - y_est; 
-                    int apply = (halo_energy * catch_rate) >> 8;
-                    
-                    if (apply > 0) {
-                        if (use_rgb_path) {
-                            row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + apply); // Boost Red
-                            row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (apply >> 3)); // Slight Green for warmth
-                        } else {
-                            row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + apply); // Boost Cr (Red)
-                            row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (apply >> 2)); // Drop Cb
-                        }
+                    // Apply the energy as ADDITIVE LIGHT (Lifting brightness + Red)
+                    if (use_rgb_path) {
+                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + halo_energy);         // Add Red Light
+                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (halo_energy >> 2)); // Add slight Green for fiery orange
+                    } else {
+                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + (halo_energy >> 1));   // Lift Brightness (Y)
+                        row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + halo_energy);         // Boost Red (Cr)
+                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (halo_energy >> 2)); // Drop Blue to keep it warm
                     }
-                    halo_energy = (halo_energy * halo_decay) >> 8; // Decay as it travels
+                    // Decay the light smoothly across the image
+                    halo_energy = (halo_energy * halo_decay) >> 8; 
                 }
             }
 
@@ -341,20 +339,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             for (int x = row_stride - 3; x >= 0; x -= 3) {
                 int y_est = use_rgb_path ? ((row_buf[x]*77 + row_buf[x+1]*150 + row_buf[x+2]*29) >> 8) : row_buf[x];
                 
-                if (y_est > 240) {
+                if (y_est > 235) {
                     halo_energy = charge_power;
                 } else if (halo_energy > 0) {
-                    int catch_rate = 255 - y_est; 
-                    int apply = (halo_energy * catch_rate) >> 8;
-                    
-                    if (apply > 0) {
-                        if (use_rgb_path) {
-                            row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + apply); 
-                            row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (apply >> 3)); 
-                        } else {
-                            row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + apply); 
-                            row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (apply >> 2)); 
-                        }
+                    if (use_rgb_path) {
+                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + halo_energy); 
+                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (halo_energy >> 2)); 
+                    } else {
+                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + (halo_energy >> 1));   // Lift Brightness
+                        row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + halo_energy);         // Boost Red
+                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (halo_energy >> 2)); // Drop Blue
                     }
                     halo_energy = (halo_energy * halo_decay) >> 8;
                 }
