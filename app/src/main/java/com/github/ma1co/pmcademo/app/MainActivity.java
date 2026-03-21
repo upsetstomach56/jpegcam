@@ -787,13 +787,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
                 currentMainTab = (currentMainTab - 1 + 4) % 4;
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // Shifted from 5
-                else if (currentMainTab == 2) currentPage = 7; // Shifted from 6
-                else if (currentMainTab == 3) currentPage = 8; // Shifted from 7
+                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
+                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
+                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
                 renderMenu();
             } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
                 if (currentMainTab == 0) { 
-                    currentPage = (currentPage - 2 + 5) % 5 + 1; // Tab 0 now has 5 pages!
+                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
+                    currentPage = (currentPage - 2 + 5) % 5 + 1; 
                     renderMenu();
                 }
             } else if (isNamingMode) {
@@ -850,13 +851,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
                 currentMainTab = (currentMainTab + 1) % 4;
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // Shifted
-                else if (currentMainTab == 2) currentPage = 7; // Shifted
-                else if (currentMainTab == 3) currentPage = 8; // Shifted
+                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
+                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
+                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
                 renderMenu();
             } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
                 if (currentMainTab == 0) { 
-                    currentPage = (currentPage % 5) + 1; // Tab 0 now has 5 pages!
+                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
+                    currentPage = (currentPage % 5) + 1; 
                     renderMenu();
                 }
             } else if (isNamingMode) {
@@ -1627,14 +1629,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (currentPage == 1) tvMenuSubtitle.setText("1. Recipe Identity & Base [HW]");
         else if (currentPage == 2) tvMenuSubtitle.setText("2. Advanced Color Engine [HW]");
         else if (currentPage == 3) tvMenuSubtitle.setText("3. Effects & Shading [HW]");
-        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW] - ADDS PROCESSING TIME!");
-        else if (currentPage == 5) tvMenuSubtitle.setText("5. Analog Physics [SW] - ADDS PROCESSING TIME!"); // NEW
-        else if (currentPage == 6) tvMenuSubtitle.setText("Global Settings"); // Shifted
-        else if (currentPage == 7) tvMenuSubtitle.setText("Web Dashboard Server"); // Shifted
-        else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community"); // Shifted
+        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW] - ADDS PROCESSING TIME");
+        else if (currentPage == 5) tvMenuSubtitle.setText("5. Analog Physics [SW] - ADDS PROCESSING TIME"); // NEW
+        else if (currentPage == 6) tvMenuSubtitle.setText("Global Settings");
+        else if (currentPage == 7) tvMenuSubtitle.setText("Web Dashboard Server");
+        else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community");
 
         for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
         if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE);
+        
+        // FIXED: The Support tab is now Page 8. This stops it from drawing over Page 7!
         if (currentPage == 8) { supportTabContainer.setVisibility(View.VISIBLE); currentItemCount = 0; return; }
 
         RTLProfile p = recipeManager.getCurrentProfile();
@@ -1767,13 +1771,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     menuRows[i].setVisibility(View.VISIBLE); 
                 }
             }
-        } else if (currentPage == 6) {
+        } else if (currentPage == 6) { // <--- MAKE SURE THIS IS 6 (Was 5)
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
             String[] gLabels = {"SW Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "SW JPEG Quality"};
             String[] gValues = { qLabels[recipeManager.getQualityIndex()], scn, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF", String.valueOf(prefJpegQuality) };
             for (int i = 0; i < 6; i++) { menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
-        } else if (currentPage == 7) {
+            
+        } else if (currentPage == 7) { // <--- MAKE SURE THIS IS 7 (Was 6)
             itemCount = 3;
             String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
             String[] cValues = { hotspotStatus, wifiStatus, "" };
@@ -2549,7 +2554,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 if (menuSelection == 0) hotspotStatus = status;
                 else if (menuSelection == 1) wifiStatus = status;
-                if (isMenuOpen && currentPage == 6) renderMenu(); 
+                
+                // --- FIXED: Changed from 6 to 7 to match the new Network tab ---
+                if (isMenuOpen && currentPage == 7) renderMenu(); 
             }
         });
     }
