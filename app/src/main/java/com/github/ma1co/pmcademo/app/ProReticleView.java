@@ -8,7 +8,7 @@ import android.hardware.Camera;
 import android.view.View;
 
 /**
- * filmOS UI: Pro AF Reticle
+ * JPEG.CAM UI: Pro AF Reticle
  * Handles the visual brackets and color states for the autofocus system.
  */
 public class ProReticleView extends View {

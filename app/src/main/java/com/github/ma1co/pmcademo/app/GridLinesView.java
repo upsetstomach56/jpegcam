@@ -7,7 +7,7 @@ import android.graphics.Paint;
 import android.view.View;
 
 /**
- * filmOS UI: Rule of Thirds Grid Overlay
+ * JPEG.CAM UI: Rule of Thirds Grid Overlay
  * Extracts the grid drawing logic from MainActivity to reduce file size.
  */
 public class GridLinesView extends View {

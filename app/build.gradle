@@ -10,7 +10,7 @@ android {
         minSdkVersion 10
         targetSdkVersion 25
         
-        // Bumped versioning for the filmOS era
+        // Bumped versioning for the JPEG.CAM era
         versionCode 3
         versionName "1.3"
         
@@ -52,7 +52,7 @@ android {
     // Dynamically rename the final output file based on versionName
     applicationVariants.all { variant ->
         variant.outputs.all {
-            outputFileName = "filmOS-v${variant.versionName}.apk"
+            outputFileName = "JPEGCAM-v${variant.versionName}.apk"
         }
     }
 }

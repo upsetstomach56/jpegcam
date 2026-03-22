@@ -43,6 +43,6 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: filmOS-App
+        name: JPEGCAM
         path: app/build/outputs/apk/**/*.apk
 # Forcing GitHub to trigger

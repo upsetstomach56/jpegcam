@@ -14,8 +14,8 @@ import com.sony.wifi.direct.DirectManager;
 import java.util.List;
 
 /**
- * filmOS Manager: Connectivity & Networking
- * Manages Wi-Fi, Hotspot, and the filmOS Dashboard server.
+ * JPEG.CAM Manager: Connectivity & Networking
+ * Manages Wi-Fi, Hotspot, and the JPEG.CAM Dashboard server.
  */
 public class ConnectivityManager {
     private Context context;

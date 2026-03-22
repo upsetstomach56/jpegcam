@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * filmOS UI: Advanced Focus Meter
+ * JPEG.CAM UI: Advanced Focus Meter
  * Renders a cinematic distance scale with dynamic DOF calculation and live plot points.
  */
 public class AdvancedFocusMeterView extends View {
@@ -35,7 +35,7 @@ public class AdvancedFocusMeterView extends View {
         trackPaint.setStrokeWidth(4);
         
         dofPaint = new Paint(); 
-        dofPaint.setColor(Color.argb(180, 230, 50, 15)); // filmOS Orange
+        dofPaint.setColor(Color.argb(180, 230, 50, 15)); // JPEG.CAM Orange
         dofPaint.setStrokeWidth(12);
         dofPaint.setStrokeCap(Paint.Cap.ROUND);
         

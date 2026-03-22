@@ -7,7 +7,7 @@ import android.graphics.Paint;
 import android.view.View;
 
 /**
- * filmOS UI: 2.35:1 Anamorphic Cinema Matte
+ * JPEG.CAM UI: 2.35:1 Anamorphic Cinema Matte
  * Handles the black bars for cinematic framing.
  */
 public class CinemaMatteView extends View {

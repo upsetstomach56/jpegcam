@@ -247,7 +247,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         File thumbsDir = new File(Environment.getExternalStorageDirectory(), "DCIM/.thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
 
-        SharedPreferences prefs = getSharedPreferences("filmOS_Prefs", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
         prefShowFocusMeter = prefs.getBoolean("focusMeter", true);
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", false);
@@ -266,7 +266,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         try {
             digitalFont = Typeface.createFromAsset(getAssets(), "fonts/digital-7.ttf");
         } catch (Exception e) {
-            Log.e("filmOS", "Could not load custom font. Did you add it to assets/fonts/?");
+            Log.e("JPEG.CAM", "Could not load custom font. Did you add it to assets/fonts/?");
             digitalFont = null;
         }
         
@@ -478,7 +478,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         recipeManager.savePreferences();
         
-        SharedPreferences.Editor editor = getSharedPreferences("filmOS_Prefs", MODE_PRIVATE).edit();
+        SharedPreferences.Editor editor = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
         editor.putBoolean("focusMeter", prefShowFocusMeter);
         editor.putBoolean("cinemaMattes", prefShowCinemaMattes);
         editor.putBoolean("gridLines", prefShowGridLines);
@@ -1263,7 +1263,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("vignetting") != null) p.set("vignetting", String.valueOf(prof.vignetteHardware));
         if (p.get("vignette") != null) p.set("vignette", String.valueOf(prof.vignetteHardware));
         
-        try { c.setParameters(p); } catch (Exception e) { Log.e("filmOS", "Stage 1 Reject: " + e.getMessage()); }
+        try { c.setParameters(p); } catch (Exception e) { Log.e("JPEG.CAM", "Stage 1 Reject: " + e.getMessage()); }
 
         p = c.getParameters(); 
 
@@ -1321,7 +1321,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", String.valueOf(prof.shadingRed));
         if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", String.valueOf(prof.shadingBlue));
         
-        try { c.setParameters(p); } catch (Exception e) { Log.e("filmOS", "Stage 2 Reject: " + e.getMessage()); }
+        try { c.setParameters(p); } catch (Exception e) { Log.e("JPEG.CAM", "Stage 2 Reject: " + e.getMessage()); }
     }
 
     private String getWbString(String pref) {
@@ -1864,7 +1864,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         batteryArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         
         tvBattery = new TextView(this); 
-        tvBattery.setTextColor(Color.rgb(227, 69, 20)); // filmOS Orange
+        tvBattery.setTextColor(Color.rgb(227, 69, 20)); // JPEG.CAM Orange
         tvBattery.setTextSize(14); 
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
         tvBattery.setPadding(0, 0, 5, 0); 
@@ -1961,7 +1961,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         supportTabContainer.setVisibility(View.GONE); 
 
         TextView tvSupportTitle = new TextView(this);
-        tvSupportTitle.setText("filmOS");
+        tvSupportTitle.setText("JPEG.CAM");
         tvSupportTitle.setTextColor(Color.WHITE);
         tvSupportTitle.setTextSize(28);
         tvSupportTitle.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1982,7 +1982,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         qrView.setLayoutParams(qrParams);
 
         TextView tvUrl = new TextView(this);
-        tvUrl.setText("jpgcookbook.com/hub");
+        tvUrl.setText("jpegcookbook.com/hub");
         tvUrl.setTextColor(Color.rgb(227, 69, 20));
         tvUrl.setTextSize(18);
         tvUrl.setTypeface(Typeface.DEFAULT_BOLD);
@@ -2230,7 +2230,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 // --- 1. SAVE PASM MODE ---
                 String currentPasm = p.getSceneMode();
                 if (currentPasm != null) {
-                    getSharedPreferences("filmOS_Prefs", MODE_PRIVATE)
+                    getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE)
                         .edit().putString("savedPasmMode", currentPasm).apply();
                 }
                 
@@ -2259,7 +2259,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 
                 c.setParameters(p);
-                Log.d("filmOS", "Successfully saved mode, zeroed hardware, and restored focus.");
+                Log.d("JPEG.CAM", "Successfully saved mode, zeroed hardware, and restored focus.");
                 Thread.sleep(200);
             } catch (Exception e) {}
         }
@@ -2478,12 +2478,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             hardwareFocalLength = cameraManager.getInitialFocalLength();
             if (hardwareFocalLength > 0.0f) {
                 isNativeLensAttached = true;
-                Log.d("filmOS_Lens", "Boot: Native Lens Detected: " + hardwareFocalLength + "mm");
+                Log.d("JPEG.CAM_Lens", "Boot: Native Lens Detected: " + hardwareFocalLength + "mm");
                 
                 autoEquipMatchingLens(hardwareFocalLength);
             } else {
                 isNativeLensAttached = false;
-                Log.d("filmOS_Lens", "Boot: Manual Lens Detected");
+                Log.d("JPEG.CAM_Lens", "Boot: Manual Lens Detected");
             }
 
             // --- THE NEW SANDBOX MEMORY INJECTION ---
@@ -2493,7 +2493,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     Camera.Parameters p = c.getParameters();
                     
                     // 1. Restore the PASM mode you were using last time
-                    String savedMode = getSharedPreferences("filmOS_Prefs", MODE_PRIVATE).getString("savedPasmMode", "manual-exposure");
+                    String savedMode = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).getString("savedPasmMode", "manual-exposure");
                     List<String> supportedModes = p.getSupportedSceneModes();
                     if (supportedModes != null && supportedModes.contains(savedMode)) {
                         p.setSceneMode(savedMode);
@@ -2505,7 +2505,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     // without forcing it to switch!
                     cachedIsManualFocus = "manual".equals(p.getFocusMode());
                 } catch (Exception e) {
-                    Log.e("filmOS", "Failed to restore camera state on boot: " + e.getMessage());
+                    Log.e("JPEG.CAM", "Failed to restore camera state on boot: " + e.getMessage());
                 }
             }
         }
@@ -2549,7 +2549,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (focalLengthMm > 0.0f) {
                     boolean wasManual = !isNativeLensAttached;
                     isNativeLensAttached = true; 
-                    Log.d("filmOS_Lens", "Native Lens Zoomed: " + focalLengthMm + "mm");
+                    Log.d("JPEG.CAM_Lens", "Native Lens Zoomed: " + focalLengthMm + "mm");
                     
                     autoEquipMatchingLens(focalLengthMm);
                     
@@ -2564,7 +2564,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     }
                 } else {
                     isNativeLensAttached = false; 
-                    Log.d("filmOS_Lens", "Manual Lens Detected.");
+                    Log.d("JPEG.CAM_Lens", "Manual Lens Detected.");
                 }
                 updateMainHUD(); 
             }
@@ -2705,7 +2705,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             currentPlaybackBitmap = bmp;
             
         } catch (OutOfMemoryError oom) {
-            android.util.Log.e("filmOS", "OOM Memory limit hit during playback. Recovering...");
+            android.util.Log.e("JPEG.CAM", "OOM Memory limit hit during playback. Recovering...");
             if (tvPlaybackInfo != null) tvPlaybackInfo.setText((idx + 1) + " / " + playbackFiles.size() + "\n[MEMORY ERROR - SKIPPED]");
             if (currentPlaybackBitmap != null) { 
                 currentPlaybackBitmap.recycle(); 
@@ -2713,7 +2713,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             System.gc(); 
         } catch (Exception e) {
-            android.util.Log.e("filmOS", "Playback error: " + e.getMessage());
+            android.util.Log.e("JPEG.CAM", "Playback error: " + e.getMessage());
         }
     }
 

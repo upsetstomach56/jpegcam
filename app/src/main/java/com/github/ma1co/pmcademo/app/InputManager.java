@@ -4,7 +4,7 @@ import android.view.KeyEvent;
 import com.sony.scalar.sysutil.ScalarInput;
 
 /**
- * filmOS Manager: Input Mapping
+ * JPEG.CAM Manager: Input Mapping
  * Translates raw Sony hardware scan codes into application commands.
  */
 public class InputManager {

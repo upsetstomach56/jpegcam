@@ -1,15 +1,15 @@
-# filmOS - In-Camera LUT Support (BETA)
+# JPEG.CAM - In-Camera LUT Support (BETA)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jbuchanan)
 
-**💾 DOWNLOAD LINK:** Download the latest release from https://www.jpgcookbook.com/filmos
+**💾 DOWNLOAD LINK:** Download the latest release from https://www.jpeg.cam
 
 **⚠️ BETA STATUS:** This project is currently in early beta. While it is stable and produces high-quality results, it is a "proof of concept" running on 2014-era hardware.
 
-filmOS turns your older Sony Alpha camera into a modern film-simulation powerhouse. This app brings professional color grading directly to your camera hardware, allowing you to apply custom 3D LUTs (`.cube` and `.cub` files) to your photos the moment you press the shutter.
+JPEG.CAM turns your older Sony Alpha camera into a modern film-simulation powerhouse. This app brings professional color grading directly to your camera hardware, allowing you to apply custom 3D LUTs (`.cube` and `.cub` files) to your photos the moment you press the shutter.
 
 ## ✨ Features
 * **Custom LUT Support:** Load your own `.cube` or `.cub` files directly from your SD card.
-* **filmOS Dashboard:** A built-in wireless web server allows you to manage LUTs and download photos directly from the camera via Wi-Fi.
+* **JPEG.CAM Dashboard:** A built-in wireless web server allows you to manage LUTs and download photos directly from the camera via Wi-Fi.
 * **Auto-Processing Engine:** The app automatically detects new photos and processes them in the background using a high-fidelity NDK engine.
 * **True Color Trilinear Interpolation:** High-fidelity color math prevents banding in gradients.
 * **Triple Quality Modes:** Choose between `PROXY (1.5MP)` for speed, `HIGH (6.0MP)` for a balance of quality, or `ULTRA (24MP)` for full resolution.
@@ -46,5 +46,5 @@ Compatible with PMCA cameras (Android 2.3.7 / API 10) including: **a5100, a6000,
 
 ## 🚀 Installation
 1. Download the [pmca-gui installer](https://github.com/ma1co/Sony-PMCA-RE/releases).
-2. Download the latest release from https://www.jpgcookbook.com/filmos
+2. Download the latest release from https://www.jpeg.cam
 3. Connect camera via USB (MTP or Mass Storage mode) and use **pmca-gui** to install.

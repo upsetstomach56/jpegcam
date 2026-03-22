@@ -120,7 +120,7 @@ public class LensProfileManager {
     public void saveProfileToFile(float focalLength, float maxAperture, List<CalPoint> points, boolean isManual) {
         File dir = getLensesDir();
         if (!dir.exists() && !dir.mkdirs()) {
-            Log.e("filmOS_Lens", "CRITICAL: Could not create LENSES directory.");
+            Log.e("JPEG.CAM_Lens", "CRITICAL: Could not create LENSES directory.");
             return;
         }
 
@@ -142,9 +142,9 @@ public class LensProfileManager {
             
             fos.flush();
             fos.close();
-            Log.d("filmOS_Lens", "Saved lens profile to SD Card: " + outFile.getAbsolutePath());
+            Log.d("JPEG.CAM_Lens", "Saved lens profile to SD Card: " + outFile.getAbsolutePath());
         } catch (Exception e) {
-            Log.e("filmOS_Lens", "Failed to save lens file: " + e.getMessage());
+            Log.e("JPEG.CAM_Lens", "Failed to save lens file: " + e.getMessage());
         }
     }
 
@@ -187,10 +187,10 @@ public class LensProfileManager {
             this.activePoints = loadedPoints;
             this.hasActiveProfile = true;
             
-            Log.d("filmOS_Lens", "Loaded profile from SD: " + filename);
+            Log.d("JPEG.CAM_Lens", "Loaded profile from SD: " + filename);
 
         } catch (Exception e) {
-            Log.e("filmOS_Lens", "Failed to load lens file: " + e.getMessage());
+            Log.e("JPEG.CAM_Lens", "Failed to load lens file: " + e.getMessage());
             clearCurrentProfile();
         }
     }

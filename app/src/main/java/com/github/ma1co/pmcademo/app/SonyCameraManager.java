@@ -54,7 +54,7 @@ public class SonyCameraManager {
             try {
                 return camera.getParameters().getFocalLength();
             } catch (Exception e) {
-                Log.e("filmOS", "Could not read initial focal length.");
+                Log.e("JPEG.CAM", "Could not read initial focal length.");
             }
         }
         return 0.0f; // 0.0 indicates a dumb manual lens
@@ -87,7 +87,7 @@ public class SonyCameraManager {
                         origWbShiftLb = p.get("white-balance-shift-lb");
                         origWbShiftCc = p.get("white-balance-shift-cc");
                     } catch (Exception e) {
-                        Log.e("filmOS", "Failed to backup parameters: " + e.getMessage());
+                        Log.e("JPEG.CAM", "Failed to backup parameters: " + e.getMessage());
                     }
                 }
 
@@ -102,14 +102,14 @@ public class SonyCameraManager {
                     pm.setDriveMode(CameraEx.ParametersModifier.DRIVE_MODE_SINGLE);
                     camera.setParameters(params);
                 } catch(Exception e) {
-                    Log.e("filmOS", "Failed to set drive mode: " + e.getMessage());
+                    Log.e("JPEG.CAM", "Failed to set drive mode: " + e.getMessage());
                 }
 
                 if (listener != null) {
                     listener.onCameraReady();
                 }
             } catch (Exception e) {
-                Log.e("filmOS", "Failed to open camera: " + e.getMessage());
+                Log.e("JPEG.CAM", "Failed to open camera: " + e.getMessage());
             }
         }
     }
@@ -125,7 +125,7 @@ public class SonyCameraManager {
                 // when releasing the camera causes a guaranteed kernel panic on BIONZ!
                 camera.stopPreview(); 
             } catch (Exception e) {
-                Log.e("filmOS", "Failed to cancel AF or stop preview on close.");
+                Log.e("JPEG.CAM", "Failed to cancel AF or stop preview on close.");
             }
         }
 
@@ -147,12 +147,12 @@ public class SonyCameraManager {
                 if (origWbShiftCc != null) p.set("white-balance-shift-cc", origWbShiftCc);
                 
                 camera.setParameters(p);
-                Log.d("filmOS", "Successfully restored standard Sony parameters.");
+                Log.d("JPEG.CAM", "Successfully restored standard Sony parameters.");
                 
                 // Give the BIONZ daemon time to digest these standard settings before calling release().
                 Thread.sleep(300);
             } catch (Exception e) {
-                Log.e("filmOS", "Failed to restore parameters: " + e.getMessage());
+                Log.e("JPEG.CAM", "Failed to restore parameters: " + e.getMessage());
             }
         }
         
@@ -161,7 +161,7 @@ public class SonyCameraManager {
             try {
                 cameraEx.release();
             } catch (Exception e) {
-                Log.e("filmOS", "Error releasing CameraEx: " + e.getMessage());
+                Log.e("JPEG.CAM", "Error releasing CameraEx: " + e.getMessage());
             }
             cameraEx = null;
             camera = null;

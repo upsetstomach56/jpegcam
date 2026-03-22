@@ -7,7 +7,7 @@ import android.graphics.Paint;
 import android.view.View;
 
 /**
- * filmOS UI: Legacy Sony Battery Icon
+ * JPEG.CAM UI: Legacy Sony Battery Icon
  * Replicates the specific 3-segment battery drawing logic from the original project.
  */
 public class BatteryView extends View {
@@ -32,7 +32,7 @@ public class BatteryView extends View {
         int w = getWidth();
         int h = getHeight();
 
-        // filmOS Orange Color
+        // JPEG.CAM Orange Color
         int orange = Color.rgb(227, 69, 20);
 
         // 1. Draw Border (Orange)

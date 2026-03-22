@@ -24,7 +24,7 @@ public class SonyFileScanner {
         this.dcimRoot = (f.getParent() != null) ? f.getParent() : path;
         this.mCallback = callback;
         
-        Log.d("filmOS", "SonyFileScanner initialized. DCIM Root: " + dcimRoot);
+        Log.d("JPEG.CAM", "SonyFileScanner initialized. DCIM Root: " + dcimRoot);
         
         // Find baseline without triggering callback
         findNewestFile(false); 
@@ -45,27 +45,27 @@ public class SonyFileScanner {
 
     public void start() {
         if (!isPolling) {
-            Log.d("filmOS", "Starting file scanner polling loop...");
+            Log.d("JPEG.CAM", "Starting file scanner polling loop...");
             isPolling = true;
             pollHandler.post(pollRunnable);
         }
     }
 
     public void stop() {
-        Log.d("filmOS", "Stopping file scanner polling loop.");
+        Log.d("JPEG.CAM", "Stopping file scanner polling loop.");
         isPolling = false;
         pollHandler.removeCallbacks(pollRunnable);
     }
 
     public void checkNow() {
-        Log.d("filmOS", "Hardware Broadcast caught! Forcing immediate check...");
+        Log.d("JPEG.CAM", "Hardware Broadcast caught! Forcing immediate check...");
         findNewestFile(true);
     }
 
     private void findNewestFile(boolean triggerCallback) {
         File dcimDir = new File(dcimRoot);
         if (!dcimDir.exists() || !dcimDir.isDirectory()) {
-            if (triggerCallback) Log.e("filmOS", "DCIM directory not found: " + dcimRoot);
+            if (triggerCallback) Log.e("JPEG.CAM", "DCIM directory not found: " + dcimRoot);
             return;
         }
 
@@ -96,18 +96,18 @@ public class SonyFileScanner {
         if (newestFile != null) {
             String currentPath = newestFile.getAbsolutePath();
             if (!currentPath.equals(lastSeenFilePath)) {
-                Log.d("filmOS", "NEW FILE DETECTED: " + currentPath);
+                Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentPath);
                 lastSeenFilePath = currentPath;
                 
                 if (triggerCallback && mCallback != null) {
                     boolean isReady = mCallback.isReadyToProcess();
-                    Log.d("filmOS", "isReadyToProcess() evaluated to: " + isReady);
+                    Log.d("JPEG.CAM", "isReadyToProcess() evaluated to: " + isReady);
                     
                     if (isReady) {
-                        Log.d("filmOS", "Firing onNewPhotoDetected callback!");
+                        Log.d("JPEG.CAM", "Firing onNewPhotoDetected callback!");
                         mCallback.onNewPhotoDetected(currentPath);
                     } else {
-                        Log.w("filmOS", "Engine blocked processing. (Either LUT is 0/OFF or processor is not initialized).");
+                        Log.w("JPEG.CAM", "Engine blocked processing. (Either LUT is 0/OFF or processor is not initialized).");
                     }
                 }
             }

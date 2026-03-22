@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>filmOS Dashboard</title>
+    <title>JPEG.CAM Dashboard</title>
     <style>
         /* --- CUSTOM CAMERA FONT (Base64 Embedded) --- */
         @font-face {
@@ -23,11 +23,11 @@
             font-display: swap;
         }
 
-        /* --- THEME VARIABLES (Matched to React filmos-theme) --- */
+        /* --- THEME VARIABLES (Matched to React JPEG.CAM-theme) --- */
         :root { 
             --bg-dark: hsl(0, 0%, 5%); 
             --bg-panel: hsl(0, 0%, 10%); 
-            --accent: rgb(227, 69, 20); /* filmOS Orange */
+            --accent: rgb(227, 69, 20); /* JPEG.CAM Orange */
             --text-main: hsl(30, 10%, 88%); 
             --text-muted: hsl(30, 5%, 55%);
             --border-color: hsl(0, 0%, 20%);
@@ -67,7 +67,7 @@
             border-bottom: 1px solid var(--border-color); 
         }
 
-        .text-filmos-glow {
+        .text-JPEG.CAM-glow {
             margin: 0;
             font-family: 'Digital7', monospace;
             color: var(--accent);
@@ -195,7 +195,7 @@
 
     <header>
         <div style="display:flex; align-items:center; gap: 15px;">
-            <h3 class="text-filmos-glow">filmOS DASHBOARD</h3>
+            <h3 class="text-JPEG.CAM-glow">JPEG.CAM DASHBOARD</h3>
             <button class="action-btn secondary-btn" style="padding: 6px 12px; font-size:10px; margin:0;" onclick="showImportManager()">IMPORT FILES</button>
         </div>
         <div class="sys-info" id="sys-info">SYNCING HARDWARE...</div>
@@ -394,7 +394,7 @@
                     let speed = exif.shutter ? (exif.shutter < 1 ? `1/${Math.round(1/exif.shutter)}s` : `${exif.shutter}s`) : '--s';
                     let iso = exif.iso ? `ISO ${exif.iso}` : 'ISO --';
                     
-                    let prefix = mode === 'GRADED' ? `filmOS RECIPE • ${viewName}` : viewName;
+                    let prefix = mode === 'GRADED' ? `JPEG.CAM RECIPE • ${viewName}` : viewName;
                     let details = [prefix, focal, fnum, speed, iso].filter(Boolean).join(' • ');
                     document.getElementById('lb-meta').innerHTML = `<span class="exif-tag" ${mode === 'GRADED' ? 'style="color:#4BA653; border-color:rgba(75, 166, 83, 0.3); background:rgba(75, 166, 83, 0.1);"' : ''}>${details}</span>`;
                 } else {
