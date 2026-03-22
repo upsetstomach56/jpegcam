@@ -1,4 +1,4 @@
-# JPEG.CAM - In-Camera LUT Support (BETA)
+# JPEG.CAM - In-Camera Custom Color Sciene System
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jbuchanan)
 
 **💾 DOWNLOAD LINK:** Download the latest release from https://www.jpeg.cam
