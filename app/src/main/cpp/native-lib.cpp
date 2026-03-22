@@ -184,9 +184,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     }
 
     // --- CONTINUOUS GRAIN SETUP ---
-    // Seed it once, and let it roll for the entire image
     uint32_t seed = (uint32_t)(start_time & 0xFFFFFFFF);
-    if (seed == 0) seed = 98765; // Failsafe: Xorshift math breaks if seed is exactly 0
+    if (seed == 0) seed = 98765; 
     int prev_noise = 0;
 
     // --- MAIN PROCESSING LOOP ---
@@ -204,7 +203,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
                 int outR = r, outG = g, outB = b;
 
-                // LUT INTERPOLATION (Unchanged)
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
                 int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -249,25 +247,25 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     targetY = targetY - ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
                 }
                 
-                // 3. Fuji Chrome & Subtractive Density (Feathered Highlights)
+                // 3. Fuji Chrome & Density 
                 int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
                 int cr_p = ((112 * outR - 94 * outG - 18 * outB) >> 8);
                 int abs_cb = cb_p < 0 ? -cb_p : cb_p;
                 int abs_cr = cr_p < 0 ? -cr_p : cr_p;
                 int sat_p = abs_cb + abs_cr;
 
-                // --- FEATHERED COLOR CHROME (WIDER TAPER) ---
+                // FEATHERED COLOR CHROME
                 if (colorChrome > 0 && sat_p > 15) {
                     int drop = ((sat_p - 15) * colorChrome) >> 2;
                     if (targetY > 160) {
-                        int fade = 255 - ((targetY - 160) * 3); // Smooth 85-step fade
+                        int fade = 255 - ((targetY - 160) * 3); 
                         if (fade < 0) fade = 0;
                         drop = (drop * fade) >> 8;
                     }
                     targetY -= drop;
                 }
                 
-                // --- FEATHERED CHROME FX BLUE (WIDER TAPER) ---
+                // FEATHERED CHROME FX BLUE
                 if (chromeBlue > 0 && cb_p > 5 && cr_p < 25) {
                     int drop = (cb_p * chromeBlue) >> 1; 
                     if (targetY > 160) {
@@ -283,11 +281,18 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     targetY -= drop;
                 }
                 
+                // --- NEW: SMOOTH SUBTRACTIVE SATURATION ---
                 if (subtractiveSat > 0 && sat_p > 20) {
-                    targetY -= (sat_p >> (6 - subtractiveSat));
+                    int density = ((sat_p - 20) * subtractiveSat) >> 5; 
+                    if (targetY > 200) {
+                        int fade = 255 - ((targetY - 200) * 4);
+                        if (fade < 0) fade = 0;
+                        density = (density * fade) >> 8;
+                    }
+                    targetY -= density;
                 }
                 
-                if (targetY < 8) targetY = 8; // Restored safety floor
+                if (targetY < 8) targetY = 8; // Safety floor
 
                 // Apply Preserved Hues
                 if (targetY != currentY) {
@@ -297,14 +302,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outB = (outB * r256) >> 8;
                 }
                 
-                // 4. REFINED HALATION (Specular Highlight Targeting)
+                // 4. Halation
                 if (halation > 0 && targetY > 230) {
                     int halo_factor = targetY - 230; 
                     int h_str = (halation == 1) ? 1 : 2;
-                    
-                    // Exponential ramp: ignores white paint, targets pure light
                     int push = (halo_factor * halo_factor * h_str) >> 4; 
-                    
                     outR += push; 
                     outB -= (push >> 1); 
                 }
@@ -324,8 +326,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
                     int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
                     int mask = (targetY < 128) ? targetY : 255 - targetY; 
-                    if (targetY < 64) mask = (mask * targetY) >> 6; // RESTORED TAPER
-                    
+                    if (targetY < 64) mask = (mask * targetY) >> 6; 
                     int gv = (noise * mask * grain) >> 15; 
                     outR += gv; 
                     outG += gv; 
@@ -366,14 +367,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outY = (outY * v_m) >> 8;
                 }
                 
-                // 4. Fuji Chrome & Density (Feathered Highlights)
+                // 4. Fuji Chrome & Density 
                 int cb = row_buf[x+1] - 128;
                 int cr = row_buf[x+2] - 128;
                 int abs_cb = cb >= 0 ? cb : -cb;
                 int abs_cr = cr >= 0 ? cr : -cr;
                 int sat = abs_cb + abs_cr;
 
-                // --- FEATHERED COLOR CHROME (WIDER TAPER) ---
+                // FEATHERED COLOR CHROME
                 if (colorChrome > 0 && sat > 15) {
                     int drop = ((sat - 15) * colorChrome) >> 2;
                     if (outY > 160) {
@@ -384,7 +385,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outY -= drop;
                 }
                 
-                // --- FEATHERED CHROME FX BLUE (WIDER TAPER) ---
+                // FEATHERED CHROME FX BLUE
                 if (chromeBlue > 0 && cb > 5 && cr < 25) {
                     int drop = (cb * chromeBlue) >> 1; 
                     if (outY > 160) {
@@ -398,24 +399,27 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                         drop = (drop * fade) >> 8;
                     }
                     outY -= drop;
-                    cr -= (drop >> 1); // Keeps the teal shift, but fades it naturally too!
+                    cr -= (drop >> 1); // Keeps the teal shift
                 }
                 
+                // --- NEW: SMOOTH SUBTRACTIVE SATURATION ---
                 if (subtractiveSat > 0 && sat > 20) {
-                    int density = (sat >> (6 - subtractiveSat));
+                    int density = ((sat - 20) * subtractiveSat) >> 5; 
+                    if (outY > 200) {
+                        int fade = 255 - ((outY - 200) * 4);
+                        if (fade < 0) fade = 0;
+                        density = (density * fade) >> 8;
+                    }
                     outY -= density;
                 }
                 
                 if (outY < 8) outY = 8; // Safety
 
-                // 5. REFINED HALATION (Specular Highlight Targeting)
+                // 5. Halation
                 if (halation > 0 && outY > 230) {
                     int halo_factor = outY - 230; 
                     int h_str = (halation == 1) ? 1 : 2;
-                    
-                    // Exponential ramp: ignores white paint, targets pure light
                     int push = (halo_factor * halo_factor * h_str) >> 4; 
-                    
                     cr += push; 
                     cb -= (push >> 1); 
                 }
@@ -435,8 +439,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
                     int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
                     int mask = (outY < 128) ? outY : 255 - outY; 
-                    if (outY < 64) mask = (mask * outY) >> 6; // RESTORED TAPER
-                    
+                    if (outY < 64) mask = (mask * outY) >> 6; 
                     outY += (noise * mask * grain) >> 15; 
                     prev_noise = raw_noise;
                 }
