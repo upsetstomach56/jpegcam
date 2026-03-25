@@ -2634,32 +2634,44 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             String metaText = (idx + 1) + " / " + playbackFiles.size() + "\n" + file.getName() + "\n" + apStr + " | " + speedStr + " | " + isoStr;
             if (tvPlaybackInfo != null) tvPlaybackInfo.setText(metaText);
 
-            BitmapFactory.Options opts = new BitmapFactory.Options();
+            // --- THE 24MB HEAP LIFESAVER: EXIF THUMBNAIL EXTRACTION ---
+            Bitmap raw = null;
             
-            opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, opts);
-            
-            final int reqWidth = 1024;
-            final int reqHeight = 768;
-            int inSampleSize = 1;
-
-            if (opts.outHeight > reqHeight || opts.outWidth > reqWidth) {
-                final int halfHeight = opts.outHeight / 2;
-                final int halfWidth = opts.outWidth / 2;
-                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                    inSampleSize *= 2;
-                }
+            // 1. Try to pull the tiny embedded EXIF thumbnail first (uses < 150 KB of RAM)
+            byte[] thumbData = exif.getThumbnail();
+            if (thumbData != null && thumbData.length > 0) {
+                BitmapFactory.Options thumbOpts = new BitmapFactory.Options();
+                thumbOpts.inPreferredConfig = Bitmap.Config.RGB_565; // Force 16-bit color (saves 50% RAM)
+                raw = BitmapFactory.decodeByteArray(thumbData, 0, thumbData.length, thumbOpts);
             }
 
-            opts.inJustDecodeBounds = false;
-            opts.inSampleSize = inSampleSize;
-            opts.inPreferredConfig = Bitmap.Config.RGB_565; 
-            opts.inPurgeable = true;
-            opts.inInputShareable = true;
+            // 2. Fallback: If no thumbnail exists, do a hyper-aggressive file decode
+            if (raw == null) {
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, opts);
+                
+                // Aggressively target a tiny 640x480 envelope
+                int inSampleSize = 1;
+                while ((opts.outHeight / inSampleSize) > 480 || (opts.outWidth / inSampleSize) > 640) {
+                    inSampleSize *= 2;
+                }
 
-            Bitmap raw = BitmapFactory.decodeFile(path, opts);
-            if (raw == null) return;
+                opts.inJustDecodeBounds = false;
+                opts.inSampleSize = inSampleSize;
+                opts.inPreferredConfig = Bitmap.Config.RGB_565; 
+                opts.inPurgeable = true;
+                opts.inInputShareable = true;
 
+                raw = BitmapFactory.decodeFile(path, opts);
+            }
+
+            if (raw == null) {
+                if (tvPlaybackInfo != null) tvPlaybackInfo.setText((idx + 1) + " / " + playbackFiles.size() + "\n[DECODE ERROR]");
+                return;
+            }
+
+            // 3. Handle Rotation & Anamorphic Squeeze
             int orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rot = 0; 
             if (orient == ExifInterface.ORIENTATION_ROTATE_90) rot = 90; 
@@ -2673,7 +2685,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
             
             if (raw != bmp) {
-                raw.recycle();
+                raw.recycle(); // Instantly destroy the intermediate raw bitmap
                 raw = null;
             }
             
