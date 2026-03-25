@@ -272,5 +272,4 @@ public class SonyCameraManager {
             cameraEx.getClass().getMethod("setSettingChangedListener", lClass).invoke(cameraEx, proxy);
         } catch (Exception e) { }
     }
-    }
 }
