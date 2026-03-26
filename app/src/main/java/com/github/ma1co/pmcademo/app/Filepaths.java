@@ -40,14 +40,24 @@ public class Filepaths {
         return def;
     }
 
-    // UNIVERSAL DCIM LOCATION
     public static File getDcimDir() {
+        // Check all possible roots to find where the camera is actively saving photos
         for (File root : getStorageRoots()) {
             File dcim = new File(root, "DCIM");
             if (dcim.exists() && dcim.isDirectory()) {
-                return dcim; // Return the exact DCIM root, no matter what SD card it's on
+                File[] subdirs = dcim.listFiles();
+                if (subdirs != null) {
+                    for (File s : subdirs) {
+                        String uName = s.getName().toUpperCase();
+                        // Find the exact DCIM containing standard Sony photo folders
+                        if (s.isDirectory() && (uName.endsWith("MSDCF") || uName.contains("ALPHA") || uName.contains("SONY"))) {
+                            return dcim; 
+                        }
+                    }
+                }
             }
         }
+        // Failsafe fallback
         return new File(getStorageRoot(), "DCIM"); 
     }
 
