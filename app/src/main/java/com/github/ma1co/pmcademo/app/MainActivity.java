@@ -132,7 +132,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private float hardwareFocalLength = 0.0f;
     private boolean isNativeLensAttached = false;
     private boolean hasPhysicalPasmDial = false;
-    private String realCameraModel = "UNKNOWN"; // <--- NEW VARIABLE
+    private boolean isFullFrame = false;
+    private BroadcastReceiver hardwareStateReceiver; // <--- ADD THIS LINE
     
     private float virtualAperture = 2.8f;
     private float virtualFocusRatio = 0.5f;
@@ -247,50 +248,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         super.onCreate(savedInstanceState);
 
         // --- AUTOMATIC HARDWARE SCANNER ---
-        realCameraModel = "UNKNOWN";
+        // --- UNIVERSAL FEATURE DETECTION ---
+        // Instead of guessing model names, we ask the Android Kernel if the 
+        // physical keypad matrix has a Mode Dial wired into it.
+        boolean hasDialKey1 = android.view.KeyCharacterMap.deviceHasKey(624);
+        boolean hasDialKey2 = android.view.KeyCharacterMap.deviceHasKey(ScalarInput.ISV_KEY_MODE_DIAL);
         
-        // Sony moved the name out of Build.MODEL ("ScalarA") on some firmwares.
-        // It is usually hiding in DEVICE, PRODUCT, or DISPLAY. We check them all.
-        String[] buildProps = {
-            android.os.Build.MODEL,
-            android.os.Build.DEVICE,
-            android.os.Build.PRODUCT,
-            android.os.Build.DISPLAY,
-            android.os.Build.BOARD,
-            android.os.Build.HARDWARE
-        };
-        
-        for (String prop : buildProps) {
-            if (prop != null) {
-                String uProp = prop.toUpperCase();
-                if (uProp.contains("ILCE") || uProp.contains("ILCA") || uProp.contains("NEX")) {
-                    realCameraModel = prop;
-                    break;
-                }
-            }
-        }
-        
-        // Log all of them as errors to bypass Sony's filter so we can see them in logcat
-        android.util.Log.e("JPEG.CAM", "--- SONY HARDWARE SCAN ---");
-        android.util.Log.e("JPEG.CAM", "MODEL: " + android.os.Build.MODEL);
-        android.util.Log.e("JPEG.CAM", "DEVICE: " + android.os.Build.DEVICE);
-        android.util.Log.e("JPEG.CAM", "PRODUCT: " + android.os.Build.PRODUCT);
-        android.util.Log.e("JPEG.CAM", "DISPLAY: " + android.os.Build.DISPLAY);
-        android.util.Log.e("JPEG.CAM", "HARDWARE: " + android.os.Build.HARDWARE);
-        android.util.Log.e("JPEG.CAM", "FINAL DECIDED MODEL: " + realCameraModel);
-        
-        String uModel = realCameraModel.toUpperCase();
-        
-        // 1. Identify cameras from the Alpha (ILCE/ILCA) and NEX families
-        boolean isDialFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
-        
-        // 2. Exclude models known to be "Screen-Only" (No physical PASM knob)
-        boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
-                               uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
-                               uModel.contains("NEX-C3") || uModel.contains("NEX-F3") ||
-                               uModel.equals("UNKNOWN");
-                               
-        hasPhysicalPasmDial = isDialFamily && !isScreenOnly;
+        hasPhysicalPasmDial = hasDialKey1 || hasDialKey2;
+        android.util.Log.e("JPEG.CAM", "Universal Dial Detection: " + hasPhysicalPasmDial);
         
         // Force creation of our JPEGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
@@ -528,11 +493,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private float getCircleOfConfusion() {
-        String model = realCameraModel.toUpperCase();
-        if (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1") || model.contains("DSC-RX1") || model.contains("ILCA-99")) {
-            return 0.030f; 
-        }
-        return 0.020f; 
+        return isFullFrame ? 0.030f : 0.020f; 
     }
     
     private void requestHudUpdate() {
@@ -2219,11 +2180,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public boolean onKeyDown(int k, KeyEvent e) { 
-        // SWALLOW PASM DIAL EVENTS ON A7II TO PREVENT OS CRASH
+        // UNIVERSAL CRASH PROTECTION: Swallow dial events on ALL cameras
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
+            
+            // AUTO-DISCOVERY: If boot detection failed but they turned a physical dial, 
+            // lock out the software wheel permanently for this session!
+            if (!hasPhysicalPasmDial) hasPhysicalPasmDial = true;
+            
             if (cameraManager != null) onHardwareStateChanged();
-            return true; 
+            return true; // Prevents the OS from force-closing the app
         }
         
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
@@ -2238,7 +2204,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public boolean onKeyUp(int k, KeyEvent e) { 
-        // SWALLOW PASM DIAL EVENTS ON A7II TO PREVENT OS CRASH
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
             return true; 
@@ -2249,21 +2214,40 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         return super.onKeyUp(k, e);
     }
     
-    @Override 
-    protected void onResume() { 
-        super.onResume(); 
-        if (hasSurface && cameraManager != null) cameraManager.open(mSurfaceView.getHolder()); 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (cameraManager != null) cameraManager.start();
         
-        IntentFilter sonyFilter = new IntentFilter("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED");
-        registerReceiver(sonyCameraReceiver, sonyFilter);
-        registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)); 
-        uiHandler.post(liveUpdater); 
+        // --- PREVENT PASM DIAL CRASH ON A7II ---
+        // Register a receiver to swallow Sony's internal hardware state broadcasts
+        // This stops ScalarABlackLauncher from force-closing the app.
+        if (hardwareStateReceiver == null) {
+            hardwareStateReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    android.util.Log.e("JPEG.CAM", "Hardware State Broadcast Intercepted!");
+                    if (cameraManager != null) onHardwareStateChanged();
+                }
+            };
+        }
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.sony.scalar.hardware.action.MODE_DIAL_CHANGED");
+        filter.addAction("com.android.server.DAConnectionManagerService.HardwareStateChanged");
+        registerReceiver(hardwareStateReceiver, filter);
     }
     
     @Override 
     protected void onPause() { 
         super.onPause(); 
         uiHandler.removeCallbacksAndMessages(null); 
+        
+        // --- NEW: Release the A7II hardware dial lock ---
+        if (hardwareStateReceiver != null) {
+            try {
+                unregisterReceiver(hardwareStateReceiver);
+            } catch (Exception e) {}
+        }
         
         if (cameraManager != null && cameraManager.getCamera() != null) {
             try {
@@ -2307,9 +2291,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } catch (Exception e) {}
         }
         
-        // (Duplication removed below here!)
         if (cameraManager != null) cameraManager.close(); 
-        try { unregisterReceiver(sonyCameraReceiver); unregisterReceiver(batteryReceiver); } catch (Exception e) {}
+        try { 
+            unregisterReceiver(sonyCameraReceiver); 
+            unregisterReceiver(batteryReceiver); 
+        } catch (Exception e) {}
+        
         if (connectivityManager != null) connectivityManager.stopNetworking(); 
         if (recipeManager != null) recipeManager.savePreferences(); 
         setAutoPowerOffMode(true);
@@ -2537,9 +2524,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (cameraManager.getCamera() != null) {
                 try {
                     Camera c = cameraManager.getCamera();
-                    cachedIsManualFocus = "manual".equals(c.getParameters().getFocusMode());
+                    Camera.Parameters p = c.getParameters();
+                    cachedIsManualFocus = "manual".equals(p.getFocusMode());
+                    
+                    // UNIVERSAL SENSOR CHECK: Full Frame cameras support APS-C cropping.
+                    isFullFrame = "true".equals(p.get("apsc-mode-supported"));
+                    android.util.Log.e("JPEG.CAM", "Universal Sensor Check. Full Frame: " + isFullFrame);
                 } catch (Exception e) {
-                    Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
+                    android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
         } // This closing bracket was missing in your file!
