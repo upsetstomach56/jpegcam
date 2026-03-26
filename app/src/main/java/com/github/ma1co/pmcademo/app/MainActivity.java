@@ -246,10 +246,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         super.onCreate(savedInstanceState);
 
         String model = android.os.Build.MODEL;
-        Log.d("JPEG.CAM", "HARDWARE ID: " + model);
+        android.util.Log.d("JPEG.CAM", "HARDWARE ID: " + model);
         String uModel = model.toUpperCase();
-        // Broader detection for A7/A6000 series physical dials
-        hasPhysicalPasmDial = uModel.contains("ILCE-7") || uModel.contains("ILCE-6") || uModel.contains("ILCE-5000") == false;
+        
+        // Comprehensive Hardware Dial Detection
+        // 1. Identify cameras from the Alpha (ILCE/ILCA) and NEX families
+        boolean isMainFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
+        
+        // 2. Exclude models known to be "Screen-Only" (No PASM knob)
+        boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
+                               uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
+                               uModel.contains("NEX-C3") || uModel.contains("NEX-F3");
+                               
+        hasPhysicalPasmDial = isMainFamily && !isScreenOnly;
         
         // Force creation of our JPGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
@@ -2461,7 +2470,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onHardwareStateChanged() {
-        Log.d("JPEG.CAM", "Physical Mode Dial Clicked!");
         runOnUiThread(new Runnable() {
             public void run() {
                 requestHudUpdate();
@@ -2486,7 +2494,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     Camera c = cameraManager.getCamera();
                     cachedIsManualFocus = "manual".equals(c.getParameters().getFocusMode());
                 } catch (Exception e) {
-                    Log.e("JPEG.CAM", "Boot Sync Failed: " + e.getMessage());
+                    Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
         }
