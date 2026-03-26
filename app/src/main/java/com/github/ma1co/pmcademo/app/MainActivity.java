@@ -132,6 +132,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private float hardwareFocalLength = 0.0f;
     private boolean isNativeLensAttached = false;
     private boolean hasPhysicalPasmDial = false;
+    private String realCameraModel = "UNKNOWN"; // <--- NEW VARIABLE
     
     private float virtualAperture = 2.8f;
     private float virtualFocusRatio = 0.5f;
@@ -245,19 +246,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // --- BYPASS SCALARA: GET REAL SONY MODEL NAME ---
-        String realModel = android.os.Build.MODEL;
+        // --- ULTIMATE HARDWARE DETECTION: PARSE BUILD.PROP DIRECTLY ---
+        realCameraModel = android.os.Build.MODEL;
         try {
-            Class<?> propClass = Class.forName("android.os.SystemProperties");
-            java.lang.reflect.Method getMethod = propClass.getMethod("get", String.class);
-            String sonyName = (String) getMethod.invoke(null, "ro.sony.cameraname");
-            if (sonyName != null && !sonyName.isEmpty()) {
-                realModel = sonyName;
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader("/system/build.prop"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.contains("ro.product.model=") || 
+                    line.contains("ro.sony.cameraname=") || 
+                    line.toUpperCase().contains("ILCE") || 
+                    line.toUpperCase().contains("NEX")) {
+                    
+                    android.util.Log.e("JPEG.CAM", "FOUND IN BUILD.PROP: " + line);
+                    
+                    if (line.contains("=")) {
+                        String val = line.split("=")[1].trim();
+                        if (val.toUpperCase().contains("ILCE") || val.toUpperCase().contains("NEX") || val.toUpperCase().contains("ILCA")) {
+                            realCameraModel = val;
+                        }
+                    }
+                }
             }
-        } catch (Exception e) { }
-        
-        android.util.Log.e("JPEG.CAM", "REAL HARDWARE ID: " + realModel); 
-        String uModel = realModel.toUpperCase();
+            br.close();
+        } catch (Exception e) {
+            android.util.Log.e("JPEG.CAM", "Build.prop read failed: " + e.getMessage());
+        }
+
+        android.util.Log.e("JPEG.CAM", "FINAL DECIDED MODEL: " + realCameraModel);
+        String uModel = realCameraModel.toUpperCase();
         
         // 1. Check if it's part of a family that typically HAS a dial
         boolean isDialFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
@@ -266,7 +282,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
                                uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
                                uModel.contains("NEX-C3") || uModel.contains("NEX-F3") ||
-                               uModel.equals("SCALARA"); // Failsafe if reflection is blocked
+                               uModel.equals("SCALARA"); 
                                
         hasPhysicalPasmDial = isDialFamily && !isScreenOnly;
         
@@ -506,11 +522,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private float getCircleOfConfusion() {
-        String model = android.os.Build.MODEL.toUpperCase();
+        String model = realCameraModel.toUpperCase(); // <--- Uses our extracted name!
         if (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1") || model.contains("DSC-RX1") || model.contains("ILCA-99")) {
-            return 0.030f; 
+            return 0.030f; // Full Frame
         }
-        return 0.020f; 
+        return 0.020f; // APS-C
     }
     
     private void requestHudUpdate() {
