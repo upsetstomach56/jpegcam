@@ -1510,7 +1510,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (hudSelection == 1) tooltip = "Aggressive frequency enhancement (Affects film grain texture)";
         } else if (currentHudMode == 7) { 
             tooltip = "Under-the-hood color science starting points (Overwrites Standard Styles)";
-        }else if (currentHudMode == 9) { 
+        } else if (currentHudMode == 9) { 
             tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         }
         
