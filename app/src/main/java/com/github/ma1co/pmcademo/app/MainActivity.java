@@ -1325,17 +1325,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             p.set("color-depth-yellow", String.valueOf(prof.colorDepthYellow));
         }
 
-        if (currentHudMode == 0) { 
-            activeCells = 9;
-            labels = new String[]{"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
-            for (int i=0; i<9; i++) {
-                int displayVal = p.advMatrix[i];
-                
-                // Subtract 100% from the diagonal so the default identity matrix shows as "0"
-                if (i==0 || i==4 || i==8) displayVal -= 100; 
-                
-                values[i] = displayVal == 0 ? "0" : (displayVal > 0 ? "+" + displayVal : String.valueOf(displayVal));
-            }
+        if (p.get("rgb-matrix-mode") != null) {
+            p.set("rgb-matrix-mode", "true");
+            
+            float mult = 10.24f; // 100% * 10.24 = 1024
+            
+            String mStr = String.format("%d,%d,%d,%d,%d,%d,%d,%d,%d",
+                Math.round(prof.advMatrix[0] * mult), Math.round(prof.advMatrix[1] * mult), Math.round(prof.advMatrix[2] * mult),
+                Math.round(prof.advMatrix[3] * mult), Math.round(prof.advMatrix[4] * mult), Math.round(prof.advMatrix[5] * mult),
+                Math.round(prof.advMatrix[6] * mult), Math.round(prof.advMatrix[7] * mult), Math.round(prof.advMatrix[8] * mult));
+            p.set("rgb-matrix", mStr);
+        }
 
         if (p.get("lens-correction") != null) p.set("lens-correction", "true");
         if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", String.valueOf(prof.shadingRed));
@@ -1343,8 +1343,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         try { c.setParameters(p); } catch (Exception e) { Log.e("JPEG.CAM", "Stage 2 Reject: " + e.getMessage()); }
     }
-
-    } // <--- ADD THIS MISSING BRACE HERE
 
     private String getWbString(String pref) {
         if ("DAY".equals(pref)) return "daylight";
