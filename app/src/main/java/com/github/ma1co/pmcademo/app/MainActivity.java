@@ -173,6 +173,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int currentItemCount = 0;
     private String savedFocusMode = null;
 
+    private char[] matrixNameBuffer = "CUSTOM      ".toCharArray();
+    
     private boolean isNamingMode = false;
     private int nameCursorPos = 0;
     private final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
@@ -569,9 +571,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         if (isHudActive) {
             // --- ON-CAMERA CUSTOM MATRIX SAVER ---
-            // Intercept Enter key if we are on the top bar of the Matrix HUD
             if (currentHudMode == 0 && hudSelection == -1) {
-                saveCurrentCustomMatrix();
+                isNamingMode = !isNamingMode; // Toggle your existing state variable
+                
+                if (isNamingMode) {
+                    // 1st Press: ENTER NAMING MODE
+                    matrixNameBuffer = "CUSTOM      ".toCharArray();
+                    nameCursorPos = 6; // Start the cursor right after "CUSTOM "
+                    updateHudUI(); 
+                } else {
+                    // 2nd Press: SAVE AND EXIT NAMING MODE
+                    String finalName = new String(matrixNameBuffer).trim();
+                    if (finalName.isEmpty()) finalName = "CUSTOM";
+                    saveCurrentCustomMatrix(finalName);
+                }
                 return; // Stop here! Do not close the HUD.
             }
             
@@ -712,6 +725,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onUpPressed() {
+        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+            char currentChar = matrixNameBuffer[nameCursorPos];
+            int idx = CHARSET.indexOf(currentChar);
+            if (idx == -1) idx = 0;
+            
+            // dir is -1 for Down, 1 for Up (adjust based on your specific D-Pad math)
+            idx += dir; 
+            if (idx >= CHARSET.length()) idx = 0;
+            if (idx < 0) idx = CHARSET.length() - 1;
+            
+            matrixNameBuffer[nameCursorPos] = CHARSET.charAt(idx);
+            updateHudUI();
+            return;
+        }
+        
         if (isHudActive) {
             if (currentHudMode == 2) {
                 handleWbAdjustment(0, 1); 
@@ -773,6 +801,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onDownPressed() {
+        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+            char currentChar = matrixNameBuffer[nameCursorPos];
+            int idx = CHARSET.indexOf(currentChar);
+            if (idx == -1) idx = 0;
+            
+            // dir is -1 for Down, 1 for Up (adjust based on your specific D-Pad math)
+            idx += dir; 
+            if (idx >= CHARSET.length()) idx = 0;
+            if (idx < 0) idx = CHARSET.length() - 1;
+            
+            matrixNameBuffer[nameCursorPos] = CHARSET.charAt(idx);
+            updateHudUI();
+            return;
+        }
+        
         if (isHudActive) {
             if (currentHudMode == 2) {
                 handleWbAdjustment(0, -1); 
@@ -837,6 +880,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onLeftPressed() {
+        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+            // dir is -1 for Left, 1 for Right
+            nameCursorPos += dir; 
+            if (nameCursorPos < 0) nameCursorPos = 0;
+            if (nameCursorPos > 11) nameCursorPos = 11;
+            updateHudUI();
+            return;
+        }
+        
         if (isHudActive) {
             if (currentHudMode == 2) handleWbAdjustment(-1, 0); 
             else {
@@ -908,6 +960,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onRightPressed() {
+        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+            // dir is -1 for Left, 1 for Right
+            nameCursorPos += dir; 
+            if (nameCursorPos < 0) nameCursorPos = 0;
+            if (nameCursorPos > 11) nameCursorPos = 11;
+            updateHudUI();
+            return;
+        }
+        
         if (isHudActive) {
             if (currentHudMode == 2) handleWbAdjustment(1, 0); 
             else {
@@ -1520,11 +1581,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             }
 
-            // 3. Update top status header (Explicitly set VISIBLE to prevent vanishing bug)
+            // 3. Update top status header
             if (tvTopStatus != null) {
-                tvTopStatus.setText("MATRIX: " + currentName);
+                if (isNamingMode) {
+                    // Draw the naming interface with brackets around the active cursor letter
+                    StringBuilder nameDisplay = new StringBuilder("NAME: ");
+                    for (int i = 0; i < matrixNameBuffer.length; i++) {
+                        if (i == nameCursorPos) {
+                            nameDisplay.append("[").append(matrixNameBuffer[i]).append("]");
+                        } else {
+                            nameDisplay.append(matrixNameBuffer[i]);
+                        }
+                    }
+                    tvTopStatus.setText(nameDisplay.toString());
+                    tvTopStatus.setTextColor(Color.YELLOW); 
+                } else {
+                    // Standard display
+                    tvTopStatus.setText("MATRIX: " + currentName);
+                    tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
+                }
                 tvTopStatus.setVisibility(View.VISIBLE); 
-                tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
             }
             
             // 4. Update Description Tooltip based on selection
@@ -1736,21 +1812,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     // --- ON-CAMERA CUSTOM MATRIX SAVER ---
-    private void saveCurrentCustomMatrix() {
+    private void saveCurrentCustomMatrix(String customName) {
         if (matrixManager == null) return;
-        
         RTLProfile p = recipeManager.getCurrentProfile();
         
-        // 1. Find the next available "CUSTOM ##" number
-        int nextId = 1;
-        for (String name : matrixManager.getNames()) {
-            if (name.startsWith("CUSTOM ")) {
-                try {
-                    int id = Integer.parseInt(name.substring(7).trim());
-                    if (id >= nextId) nextId = id + 1;
-                } catch (Exception e) { }
-            }
-        }
+        // Save to SD Card using the user's typed name
+        matrixManager.saveMatrix(customName, p.advMatrix, "Saved directly from camera UI.");
+        matrixManager.scanMatrices();
+        updateHudUI(); 
+    }
         
         // 2. Format the new name (e.g., "CUSTOM 01")
         String newName = String.format("CUSTOM %02d", nextId);
