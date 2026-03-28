@@ -44,8 +44,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
-    private MatrixManager matrixManager;
+    private MatrixManager matrixManager; // <-- NEW
     private ConnectivityManager connectivityManager;
+    
+    private int activeMatrixIndex = 0; // <-- NEW: Tracks which JSON we are viewing
     
     private Typeface digitalFont; 
     
@@ -198,27 +200,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private int mDialMode = DIAL_MODE_RTL;
 
-// --- MATRIX PRESET DATA ---
-    private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
-    private final int[][] MATRIX_PRESET_VALUES = {
-        {100, 0, 0, 0, 100, 0, 0, 0, 100},   // Standard
-        {115, 5, 0, 5, 105, 0, 0, 0, 95},    // Golden Hour
-        {95, 0, 0, 0, 110, 5, 0, 15, 105},   // PNW Green
-        {110, -10, 0, -5, 100, 10, 0, 5, 115}, // Cinematic
-        {130, 0, 0, 0, 130, 0, 0, 0, 130},   // Bleach Bypass
-        {0, 140, 0, 100, 0, 0, 0, 0, 100}    // Aerochrome
-    };
-    private final String[] MATRIX_PRESET_NOTES = {
-        "Identity Matrix. Zero color shift.",
-        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 5%.",
-        "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
-        "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
-        "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
-        "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.",
-        "Manual matrix override active. Row-sum balance not guaranteed."
-    };
-
-
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -313,6 +294,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
         recipeManager = new RecipeManager();
+        matrixManager = new MatrixManager(); // <-- NEW
+        matrixManager.scanMatrices();        // <-- NEW
         connectivityManager = new ConnectivityManager(this, this);
 
         lensManager = new LensProfileManager(this);
@@ -1476,27 +1459,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             int bBal = p.advMatrix[6] + p.advMatrix[7] + p.advMatrix[8];
             String balText = String.format(" [ R:%d%% | G:%d%% | B:%d%% ]", rBal, gBal, bBal);
 
-            // 2. Identify Current Preset from Files
-            String currentName = "CUSTOM";
-            tooltip = "Manual matrix override active.";
+            // 2. Verify if current math matches an SD Card file
+            String currentName = "CUSTOM (UNSAVED)";
+            String matrixNote = "Use D-Pad to cycle SD Card matrices.";
             
-            for (int i = 0; i < matrixManager.getCount(); i++) {
-                if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
-                    currentName = matrixManager.getNames().get(i);
-                    tooltip = matrixManager.getNote(i);
-                    break;
+            if (matrixManager != null && matrixManager.getCount() > 0) {
+                int[] loaded = matrixManager.getValues(activeMatrixIndex);
+                boolean matches = true;
+                for (int i=0; i<9; i++) { if (p.advMatrix[i] != loaded[i]) matches = false; }
+                
+                if (matches) {
+                    currentName = matrixManager.getNames().get(activeMatrixIndex);
+                    matrixNote = matrixManager.getNote(activeMatrixIndex);
                 }
             }
 
             // 3. Update top status header
             if (tvTopStatus != null) {
                 tvTopStatus.setText("MATRIX: " + currentName);
+                tvTopStatus.setVisibility(View.VISIBLE);
                 tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
             }
             
             // 4. Update Description Tooltip based on selection
             if (hudSelection == -1) {
-                tooltip = "Select active RGB Matrix (SD Card integration pending)";
+                tooltip = "FILE: " + matrixNote;
             } else {
                 String[] t = {
                     "Red sensitivity to Red light (Primary - baseline 100)", "Pushes Green light into Red channel (baseline 0)", "Pushes Blue light into Red channel (baseline 0)",
@@ -1614,30 +1601,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         if (currentHudMode == 0) { 
             if (hudSelection == -1) {
-                // --- MODULAR PRESET CYCLING ---
-                // 1. Find the current file index by comparing values
-                int currentIdx = -1;
-                for (int i = 0; i < matrixManager.getCount(); i++) {
-                    if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
-                        currentIdx = i; 
-                        break;
+                // --- CYCLE SD CARD MATRICES ---
+                if (matrixManager != null && matrixManager.getCount() > 0) {
+                    activeMatrixIndex += dir;
+                    if (activeMatrixIndex < 0) activeMatrixIndex = matrixManager.getCount() - 1;
+                    if (activeMatrixIndex >= matrixManager.getCount()) activeMatrixIndex = 0;
+                    
+                    int[] loadedVals = matrixManager.getValues(activeMatrixIndex);
+                    // Safely copy the JSON values into the live camera profile
+                    for(int i = 0; i < 9; i++) {
+                        p.advMatrix[i] = loadedVals[i];
                     }
                 }
-                
-                // 2. Move to the next/previous file in the folder
-                int count = matrixManager.getCount();
-                int nextIdx = (currentIdx + dir + count) % count; 
-                
-                // 3. Load the new values into the profile
-                System.arraycopy(matrixManager.getValues(nextIdx), 0, p.advMatrix, 0, 9);
-                
             } else {
-                // --- MANUAL CELL ADJUSTMENT ---
-                int step = 5; 
-                int target = p.advMatrix[hudSelection] + (dir * step);
-                p.advMatrix[hudSelection] = Math.max(-200, Math.min(200, target)); 
+                // --- NORMAL MATH ADJUSTMENT ---
+                int step = 25; 
+                boolean isDiagonal = (hudSelection == 0 || hudSelection == 4 || hudSelection == 8);
+                int base = isDiagonal ? 1024 : 0;
+                int offset = p.advMatrix[hudSelection] - base;
+                int target = Math.round((float)(offset + (dir * step)) / step) * step; 
+                int finalVal = base + target;
+                p.advMatrix[hudSelection] = Math.max(-1024, Math.min(isDiagonal ? 2048 : 1024, finalVal));
             }
-        } else if (currentHudMode == 1) { 
+        } else if (currentHudMode == 1) {
             if (hudSelection == 0) p.colorDepthRed = Math.max(-7, Math.min(7, p.colorDepthRed + dir));
             else if (hudSelection == 1) p.colorDepthGreen = Math.max(-7, Math.min(7, p.colorDepthGreen + dir));
             else if (hudSelection == 2) p.colorDepthBlue = Math.max(-7, Math.min(7, p.colorDepthBlue + dir));
