@@ -571,24 +571,41 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isProcessing) return;
 
         if (isHudActive) {
-            // DIAGNOSTIC LOG: Print the exact selection value when Enter is pressed
-            android.util.Log.e("JPEG.CAM", "Enter pressed. HudMode: " + currentHudMode + " Selection: " + hudSelection);
-
-            // --- ON-CAMERA CUSTOM MATRIX SAVER ---
-            // Relaxing the condition temporarily to see if we can trap it at selection 0 or -1
-            if (currentHudMode == 0 && (hudSelection == -1 || hudSelection == 0)) {
-                isNamingMode = !isNamingMode; 
+            if (currentHudMode == 0 && hudSelection == -1) {
+                RTLProfile p = recipeManager.getCurrentProfile();
                 
+                // --- NEW: DUPLICATE MATH CHECK ---
+                // Before we start naming a new file, check if these numbers already exist
+                if (!isNamingMode) {
+                    for (int i = 0; i < matrixManager.getCount(); i++) {
+                        int[] existing = matrixManager.getValues(i);
+                        boolean isMatch = true;
+                        for (int j = 0; j < 9; j++) {
+                            if (p.advMatrix[j] != existing[j]) { isMatch = false; break; }
+                        }
+                        
+                        if (isMatch) {
+                            // Found it! Tell the user and stop.
+                            String existingName = matrixManager.getNames().get(i);
+                            tvTopStatus.setText("ALREADY SAVED: " + existingName);
+                            tvTopStatus.setTextColor(Color.GREEN);
+                            return; // Exit without opening Naming Mode
+                        }
+                    }
+                }
+
+                // --- PROCEED TO NAMING IF UNIQUE ---
+                isNamingMode = !isNamingMode;
                 if (isNamingMode) {
                     matrixNameBuffer = "CUSTOM      ".toCharArray();
-                    nameCursorPos = 6; 
+                    nameCursorPos = 0; // Start at the beginning for total control
                     updateHudUI(); 
                 } else {
                     String finalName = new String(matrixNameBuffer).trim();
                     if (finalName.isEmpty()) finalName = "CUSTOM";
                     saveCurrentCustomMatrix(finalName);
                 }
-                return; // Stop here! Do not close the HUD.
+                return;
             }
             
             // --- STANDARD HUD EXIT ---
@@ -1821,11 +1838,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // --- ON-CAMERA CUSTOM MATRIX SAVER ---
     private void saveCurrentCustomMatrix(String customName) {
         if (matrixManager == null) return;
-        RTLProfile p = recipeManager.getCurrentProfile();
         
-        // Save to SD Card using the user's typed name
-        matrixManager.saveMatrix(customName, p.advMatrix, "Saved directly from camera UI.");
+        // --- NAME COLLISION CHECK ---
+        String finalName = customName;
+        for (String existing : matrixManager.getNames()) {
+            if (existing.equalsIgnoreCase(finalName)) {
+                finalName = finalName + "+"; // Quick "versioning" for collisions
+            }
+        }
+        
+        RTLProfile p = recipeManager.getCurrentProfile();
+        matrixManager.saveMatrix(finalName, p.advMatrix, "Saved directly from camera UI.");
         matrixManager.scanMatrices();
+        
+        // Reset scrolling lock so the UI finds our brand new file immediately
+        isScrollingMatrices = false; 
         updateHudUI(); 
     }
 
