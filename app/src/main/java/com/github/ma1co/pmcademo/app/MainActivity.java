@@ -475,7 +475,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isMenuOpen) { exitMenu(); return; }
         if (isProcessing) return; 
         
-        mDialMode = DIAL_MODE_RTL;
+        // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
         
         if (displayState == 0 && !isMenuOpen) setHUDVisibility(View.GONE);
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
@@ -777,8 +777,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 renderMenu();
             }
             else { 
-                isMenuEditing = !isMenuEditing; 
-                renderMenu(); 
+                // --- NEW: SONY NATIVE ENTER BEHAVIOR ---
+                if (menuSelection == -2) {
+                    // "Pressing ENTER while a tab is highlighted does nothing"
+                    return; 
+                } else if (menuSelection >= 0) {
+                    // "Pressing ENTER on an item selects it... pressing ENTER again confirms"
+                    isMenuEditing = !isMenuEditing; 
+                    renderMenu(); 
+                }
             }
         }
     }
@@ -846,9 +853,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(1);
             } else {
-                menuSelection--;
-                if (menuSelection < -2) {
+                // --- FIXED: INCLUDES TABS (-2) IN THE LOOP ---
+                if (menuSelection == 0) {
+                    // UP from the top item jumps to the Tabs
+                    menuSelection = -2; 
+                } else if (menuSelection == -2) {
+                    // UP from the Tabs loops to the BOTTOM of the current page
                     menuSelection = currentItemCount - 1;
+                    if (menuSelection < 0) menuSelection = -2; // Failsafe for empty page
+                } else {
+                    // Normal scroll up
+                    menuSelection--;
                 }
                 renderMenu();
             }
@@ -923,9 +938,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(-1);
             } else {
-                menuSelection++;
-                if (menuSelection >= currentItemCount) {
+                // --- FIXED: INCLUDES TABS (-2) IN THE LOOP ---
+                if (menuSelection == -2) {
+                    // DOWN from the Tabs drops to the TOP item
+                    menuSelection = 0;
+                    if (currentItemCount == 0) menuSelection = -2; // Failsafe if page is empty
+                } else if (menuSelection == currentItemCount - 1) {
+                    // DOWN from the bottom item loops back to the Tabs
                     menuSelection = -2;
+                } else {
+                    // Normal scroll down
+                    menuSelection++;
                 }
                 renderMenu();
             }
@@ -984,24 +1007,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
-                currentMainTab = (currentMainTab - 1 + 4) % 4;
+            if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
+                currentMainTab--;
+                if (currentMainTab < 0) currentMainTab = 3; // Loop back to end
+                
+                // Drop into the first page of the newly selected tab
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
-                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
-                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
                 renderMenu();
-            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
-                if (currentMainTab == 0) { 
-                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
-                    currentPage = (currentPage - 2 + 5) % 5 + 1; 
-                    renderMenu();
-                }
+                
             } else if (isNamingMode) {
                 nameCursorPos = Math.max(0, nameCursorPos - 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- NEW: VAULT SCROLLING (LEFT) ---
+                // --- VAULT SCROLLING (LEFT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
                     if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
                         vaultIndex -= 1;
@@ -1011,6 +1032,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 } else {
                     handleMenuChange(-1); // Normal menu editing
                 }
+            } else { // 2. PAGE LEVEL NAVIGATION
+                currentPage--;
+                if (currentPage < 1) currentPage = 8; // Wrap from Page 1 to Page 8
+                
+                // Sync the highlighted Tab at the top to match the new page
+                if (currentPage <= 5) currentMainTab = 0;
+                else if (currentPage == 6) currentMainTab = 1;
+                else if (currentPage == 7) currentMainTab = 2;
+                else if (currentPage == 8) currentMainTab = 3;
+                
+                menuSelection = 0; // Drop cursor to the top of the new page
+                renderMenu();
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
@@ -1065,24 +1098,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
-                currentMainTab = (currentMainTab + 1) % 4;
+            if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
+                currentMainTab++;
+                if (currentMainTab > 3) currentMainTab = 0; // Loop back to start
+                
+                // Drop into the first page of the newly selected tab
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
-                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
-                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
                 renderMenu();
-            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
-                if (currentMainTab == 0) { 
-                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
-                    currentPage = (currentPage % 5) + 1; 
-                    renderMenu();
-                }
+                
             } else if (isNamingMode) {
                 nameCursorPos = Math.min(7, nameCursorPos + 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- NEW: VAULT SCROLLING (RIGHT) ---
+                // --- VAULT SCROLLING (RIGHT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
                     if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
                         vaultIndex = (vaultIndex + 1) % vaultFiles.size();
@@ -1091,6 +1122,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 } else {
                     handleMenuChange(1); // Normal menu editing
                 }
+            } else { // 2. PAGE LEVEL NAVIGATION
+                currentPage++;
+                if (currentPage > 8) currentPage = 1; // Wrap from Page 8 to Page 1
+                
+                // Sync the highlighted Tab at the top to match the new page
+                if (currentPage <= 5) currentMainTab = 0;
+                else if (currentPage == 6) currentMainTab = 1;
+                else if (currentPage == 7) currentMainTab = 2;
+                else if (currentPage == 8) currentMainTab = 3;
+                
+                menuSelection = 0; // Drop cursor to the top of the new page
+                renderMenu();
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
@@ -1109,14 +1152,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else handleHudAdjustment(direction);
             return;
         }
-        if (isPlaybackMode) { showPlaybackImage(playbackIndex + direction); } 
+        if (isPlaybackMode) { 
+            showPlaybackImage(playbackIndex + direction); 
+        } 
         else if (isMenuOpen) {
             if (isNamingMode) { 
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
-                handleMenuChange(direction); 
+                // --- NEW: VAULT SCROLLING (DIAL) ---
+                if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
+                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                        if (direction > 0) {
+                            vaultIndex = (vaultIndex + 1) % vaultFiles.size();
+                        } else {
+                            vaultIndex -= 1;
+                            if (vaultIndex < 0) vaultIndex += vaultFiles.size();
+                        }
+                        renderMenu();
+                    }
+                } else {
+                    handleMenuChange(direction); 
+                }
             } else { 
-                if (direction > 0) onDownPressed(); else onUpPressed(); 
+                // This perfectly inherits the Native loops we built earlier!
+                if (direction > 0) onDownPressed(); 
+                else onUpPressed(); 
             }
         } else if (!isProcessing) {
             handleHardwareInput(direction); 
@@ -2553,8 +2613,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         return tv; 
     }
     
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        int action = event.getAction();
+
+        // --- 1. THE PASM DIAL SHIELD ---
+        if (keyCode == 624 || keyCode == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (keyCode >= ScalarInput.ISV_KEY_MODE_INVALID && keyCode <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
+            
+            if (action == android.view.KeyEvent.ACTION_DOWN) {
+                if (!hasPhysicalPasmDial) hasPhysicalPasmDial = true;
+                if (cameraManager != null) onHardwareStateChanged();
+            }
+            return true; // Bouncer defeated: Sony OS never sees the dial turn
+        }
+
+        // --- 2. THE PLAYBACK BUTTON HIJACK ---
+        if (keyCode == ScalarInput.ISV_KEY_PLAY || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
+            
+            // We only trigger our logic when the user RELEASES the button (ACTION_UP)
+            // But we return 'true' for BOTH press and release to swallow it entirely.
+            if (action == android.view.KeyEvent.ACTION_UP) {
+                if (!isProcessing) {
+                    if (isPlaybackMode) exitPlayback(); 
+                    else if (!isMenuOpen) enterPlayback();
+                }
+            }
+            return true; // Bouncer defeated: Native gallery will not open
+        }
+
+        // Pass all other normal buttons (D-Pad, Center button, etc.) down to your normal listeners
+        return super.dispatchKeyEvent(event);
+    }
+    
     @Override 
-    public boolean onKeyDown(int k, KeyEvent e) { 
+    public boolean onKeyDown(int k, android.view.KeyEvent e) { 
         // UNIVERSAL CRASH PROTECTION: Swallow dial events on ALL cameras
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
@@ -2568,23 +2662,35 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
-        if (k == ScalarInput.ISV_KEY_PLAY) {
+        
+        // --- FIXED: Added standard Android keycode ---
+        if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
             if (isPlaybackMode) exitPlayback(); 
             else if (!isMenuOpen && !isProcessing) enterPlayback();
-            return true;
+            return true; // Swallow the press
         }
+        
         if (inputManager != null) return inputManager.handleKeyDown(k, e) || super.onKeyDown(k, e); 
         return super.onKeyDown(k, e);
     }
-    
+
     @Override 
-    public boolean onKeyUp(int k, KeyEvent e) { 
+    public boolean onKeyUp(int k, android.view.KeyEvent e) { 
+        // UNIVERSAL CRASH PROTECTION: Swallow dial events on ALL cameras
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
             return true; 
         }
         
+        // Protect shutter inputs while processing
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
+
+        // --- CRITICAL: Swallow the release event so the Sony OS does nothing ---
+        if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
+            return true; 
+        }
+        
+        // Pass everything else down the chain
         if (inputManager != null) return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e); 
         return super.onKeyUp(k, e);
     }
