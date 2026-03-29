@@ -1,14 +1,18 @@
 package com.github.ma1co.pmcademo.app;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 import java.io.File;
 import java.util.HashSet;
+import java.util.Locale;
 
 public class SonyFileScanner {
     private ScannerCallback mCallback;
+    private Context mContext;
     
     // The Delta Tracker: Remembers every file that existed when the app booted
     private HashSet<String> knownFiles = new HashSet<String>();
@@ -23,7 +27,8 @@ public class SonyFileScanner {
         boolean isReadyToProcess(); 
     }
 
-    public SonyFileScanner(ScannerCallback callback) {
+    public SonyFileScanner(Context context, ScannerCallback callback) {
+        this.mContext = context;
         this.mCallback = callback;
         this.mainHandler = new Handler(Looper.getMainLooper()); 
         
@@ -83,13 +88,14 @@ public class SonyFileScanner {
         File[] subDirs = dcimDir.listFiles();
         if (subDirs != null) {
             for (File dir : subDirs) {
-                // BUG FIX: Don't filter by name. If it's a directory in DCIM, it's a candidate.
+                // BUG FIX: Don't filter by name. Asian/Regional firmwares use varied names.
+                // If it's a directory in DCIM, we check it.
                 if (dir.isDirectory() && !dir.getName().startsWith(".")) { 
                     File[] files = dir.listFiles();
                     if (files != null) {
                         for (File f : files) {
                             // Use Locale.US to ensure ".JPG" is always interpreted correctly
-                            String name = f.getName().toUpperCase(java.util.Locale.US);
+                            String name = f.getName().toUpperCase(Locale.US);
                             
                             if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS") && !name.startsWith("TEMP_")) {
                                 
@@ -97,8 +103,7 @@ public class SonyFileScanner {
                                 
                                 if (!knownFiles.contains(currentFilePath)) {
                                     
-                                    // SAFETY CHECK: Ensure the file is actually finished being written
-                                    // If a 24MP file is 0kb, the camera is still writing it!
+                                    // SAFETY CHECK: Ensure the file is finished being written
                                     if (f.length() < 1024) continue; 
 
                                     knownFiles.add(currentFilePath);
@@ -106,14 +111,12 @@ public class SonyFileScanner {
                                     if (triggerCallback) {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);
                                         
-                                        // DEBUG TOAST 1: Confirm the scanner actually saw the file
+                                        // DIAGNOSTIC 1: Scanner saw the file
                                         final String fileName = name; 
                                         mainHandler.post(new Runnable() {
                                             @Override
                                             public void run() {
-                                                // Using a long toast so they have time to read it
-                                                android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
-                                                    "SCANNER SEEN: " + fileName, android.widget.Toast.LENGTH_SHORT).show();
+                                                Toast.makeText(mContext, "SCANNER SEEN: " + fileName, Toast.LENGTH_SHORT).show();
                                             }
                                         });
 
@@ -122,18 +125,16 @@ public class SonyFileScanner {
                                                 final String finalPathToProcess = currentFilePath; 
                                                 mainHandler.post(new Runnable() {
                                                     @Override public void run() { 
-                                                        // DEBUG TOAST 2: Confirm the engine is actually starting
-                                                        android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
-                                                            "ENGINE STARTING...", android.widget.Toast.LENGTH_SHORT).show();
+                                                        // DIAGNOSTIC 2: Engine Handoff
+                                                        Toast.makeText(mContext, "ENGINE STARTING...", Toast.LENGTH_SHORT).show();
                                                         mCallback.onNewPhotoDetected(finalPathToProcess); 
                                                     }
                                                 });
                                             } else {
-                                                // DEBUG TOAST 3: This is the most important one for your Asian tester!
+                                                // DIAGNOSTIC 3: The Blocked Wall
                                                 mainHandler.post(new Runnable() {
                                                     @Override public void run() {
-                                                        android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
-                                                            "BLOCKED: Engine not ready or Recipe OFF", android.widget.Toast.LENGTH_LONG).show();
+                                                        Toast.makeText(mContext, "BLOCKED: Engine not ready or Recipe OFF", Toast.LENGTH_LONG).show();
                                                     }
                                                 });
                                                 Log.w("JPEG.CAM", "Engine blocked processing for: " + name);

@@ -28,6 +28,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -371,7 +372,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); }
         });
         
-        mScanner = new SonyFileScanner(new SonyFileScanner.ScannerCallback() {
+        mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
@@ -392,7 +393,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private void processWhenFileReady(final String path) {
     // ADD THIS DIAGNOSTIC
-    Toast.makeText(this, "File Detected! Waiting for write...", Toast.LENGTH_SHORT).show();
+    android.widget.Toast.makeText(this, "File Detected! Waiting for write...", android.widget.Toast.LENGTH_SHORT).show();
     
     final File f = new File(path);
         if (!f.exists()) return; 
