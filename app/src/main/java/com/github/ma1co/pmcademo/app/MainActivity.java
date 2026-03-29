@@ -391,7 +391,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     
     private void processWhenFileReady(final String path) {
-        final File f = new File(path);
+    // ADD THIS DIAGNOSTIC
+    Toast.makeText(this, "File Detected! Waiting for write...", Toast.LENGTH_SHORT).show();
+    
+    final File f = new File(path);
         if (!f.exists()) return; 
 
         isProcessing = true; 

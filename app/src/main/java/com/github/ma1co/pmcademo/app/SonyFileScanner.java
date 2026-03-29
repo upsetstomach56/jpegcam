@@ -83,43 +83,64 @@ public class SonyFileScanner {
         File[] subDirs = dcimDir.listFiles();
         if (subDirs != null) {
             for (File dir : subDirs) {
-                String dirName = dir.getName().toUpperCase();
-                
-                // Only look inside valid photo folders
-                if (dir.isDirectory() && (dirName.endsWith("MSDCF") || dirName.contains("ALPHA") || dirName.contains("SONY"))) {
+                // BUG FIX: Don't filter by name. If it's a directory in DCIM, it's a candidate.
+                if (dir.isDirectory() && !dir.getName().startsWith(".")) { 
                     File[] files = dir.listFiles();
                     if (files != null) {
                         for (File f : files) {
-                            String name = f.getName().toUpperCase();
+                            // Use Locale.US to ensure ".JPG" is always interpreted correctly
+                            String name = f.getName().toUpperCase(java.util.Locale.US);
+                            
                             if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS") && !name.startsWith("TEMP_")) {
                                 
-                                // DELTA TRACKING: Ignore sorting entirely. Just ask, "Is this file brand new?"
                                 String currentFilePath = f.getAbsolutePath();
                                 
                                 if (!knownFiles.contains(currentFilePath)) {
-                                    // Add it to the tracker so we don't process it twice
+                                    
+                                    // SAFETY CHECK: Ensure the file is actually finished being written
+                                    // If a 24MP file is 0kb, the camera is still writing it!
+                                    if (f.length() < 1024) continue; 
+
                                     knownFiles.add(currentFilePath);
                                     
                                     if (triggerCallback) {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);
                                         
+                                        // DEBUG TOAST 1: Confirm the scanner actually saw the file
+                                        final String fileName = name; 
+                                        mainHandler.post(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                // Using a long toast so they have time to read it
+                                                android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
+                                                    "SCANNER SEEN: " + fileName, android.widget.Toast.LENGTH_SHORT).show();
+                                            }
+                                        });
+
                                         if (mCallback != null) {
                                             if (mCallback.isReadyToProcess()) {
-                                                
-                                                // Create a final copy of the string to satisfy the Java compiler for the inner class
                                                 final String finalPathToProcess = currentFilePath; 
-                                                
                                                 mainHandler.post(new Runnable() {
-                                                    @Override public void run() { mCallback.onNewPhotoDetected(finalPathToProcess); }
+                                                    @Override public void run() { 
+                                                        // DEBUG TOAST 2: Confirm the engine is actually starting
+                                                        android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
+                                                            "ENGINE STARTING...", android.widget.Toast.LENGTH_SHORT).show();
+                                                        mCallback.onNewPhotoDetected(finalPathToProcess); 
+                                                    }
                                                 });
-                                                
                                             } else {
-                                                Log.w("JPEG.CAM", "Engine blocked processing. (LUT is 0/OFF or processor not initialized).");
+                                                // DEBUG TOAST 3: This is the most important one for your Asian tester!
+                                                mainHandler.post(new Runnable() {
+                                                    @Override public void run() {
+                                                        android.widget.Toast.makeText(mainHandler.getLooper().getThread().getContext(), 
+                                                            "BLOCKED: Engine not ready or Recipe OFF", android.widget.Toast.LENGTH_LONG).show();
+                                                    }
+                                                });
+                                                Log.w("JPEG.CAM", "Engine blocked processing for: " + name);
                                             }
                                         }
                                     }
                                 }
-                                
                             }
                         }
                     }
