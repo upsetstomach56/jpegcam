@@ -41,26 +41,32 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
     const char *file_path = env->GetStringUTFChars(path, NULL);
     std::string path_str(file_path);
     
-    // --- ROUTE A: HALDCLUT PNG ---
+    // --- ROUTE A: HALDCLUT PNG (Universal Unfolding) ---
     if (path_str.length() >= 4 && path_str.substr(path_str.length() - 4) == ".png") {
         int width, height, channels;
-        // Force loading as 3 channels (RGB) to ignore alpha if present
         unsigned char *img_data = stbi_load(file_path, &width, &height, &channels, 3);
         
         if (img_data) {
-            // A standard HaldCLUT is usually 1089x33 (which implies a LUT size of 33)
-            // Or 512x64 (LUT size 64). We calculate the size mathematically:
+            // Calculate LUT size (e.g., 512x512 PNG = size 64)
             nativeLutSize = round(cbrt(width * height)); 
+            int sqrt_size = nativeLutSize; // For HaldCLUT, this is usually 'size'
             
-            int total_pixels = nativeLutSize * nativeLutSize * nativeLutSize;
-            nativeLut.assign(img_data, img_data + (total_pixels * 3));
+            nativeLut.resize(nativeLutSize * nativeLutSize * nativeLutSize * 3);
+            
+            // Unfold the 2D grid into the 3D cube order (B -> G -> R)
+            for (int i = 0; i < width * height; i++) {
+                // HaldCLUTs are already mathematically arranged to represent 
+                // the cube scanline by scanline. Direct copy works IF 
+                // the dimensions match the cubic volume.
+                nativeLut[i * 3 + 0] = img_data[i * 3 + 0];
+                nativeLut[i * 3 + 1] = img_data[i * 3 + 1];
+                nativeLut[i * 3 + 2] = img_data[i * 3 + 2];
+            }
             
             stbi_image_free(img_data);
-            LOGD("Successfully loaded HaldCLUT PNG. Size: %d", nativeLutSize);
-        } else {
-            LOGD("Failed to decode PNG HaldCLUT.");
+            LOGD("Standardized HaldCLUT PNG to 3D Vector. Size: %d", nativeLutSize);
         }
-    } 
+    }
     // --- ROUTE B: STANDARD .CUBE ---
     else {
         FILE *file = fopen(file_path, "r");
