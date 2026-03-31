@@ -20,7 +20,9 @@ public class SonyFileScanner {
     private HandlerThread scannerThread;
     private Handler backgroundHandler;
     private Handler mainHandler;
-    private boolean isPolling = false;
+    
+    // MADE PUBLIC: So MainActivity's "Sniper Trigger" can wake it up
+    public boolean isPolling = false;
 
     public interface ScannerCallback {
         void onNewPhotoDetected(String filePath);
@@ -42,7 +44,8 @@ public class SonyFileScanner {
         backgroundHandler.post(new Runnable() {
             @Override public void run() { 
                 findNewestFile(false); 
-                start(); // Only start polling AFTER the baseline is built
+                // FIXED: We DO NOT call start() here anymore! 
+                // We want the SD card to go to sleep immediately after booting.
             }
         });
     }
@@ -69,7 +72,7 @@ public class SonyFileScanner {
         }
     }
 
-    private void scheduleNextPoll() {
+    public void scheduleNextPoll() {
         backgroundHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -107,6 +110,12 @@ public class SonyFileScanner {
                                     if (f.length() < 1024) continue; 
 
                                     knownFiles.add(currentFilePath);
+                                    
+                                    // ---------------------------------------------------------
+                                    // THE KILL SWITCH
+                                    // We found a new file! Stop hammering the SD card.
+                                    // ---------------------------------------------------------
+                                    isPolling = false; 
                                     
                                     if (triggerCallback) {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);

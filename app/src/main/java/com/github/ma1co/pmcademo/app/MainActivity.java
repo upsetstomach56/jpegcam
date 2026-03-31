@@ -2690,7 +2690,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return true; // Prevents the OS from force-closing the app
         }
         
+        // If we are already processing a photo, ignore all shutter presses
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
+        
+        // --- NEW: THE SNIPER TRIGGER ---
+        // If they fully pressed the shutter, wake up the scanner!
+        if (k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2 || k == android.view.KeyEvent.KEYCODE_CAMERA) {
+            if (fileScanner != null && !fileScanner.isPolling) {
+                fileScanner.isPolling = true;
+                fileScanner.scheduleNextPoll();
+                android.util.Log.d("JPEG.CAM", "Sniper Trigger: Shutter pressed, watching SD card...");
+            }
+            // Notice: We DO NOT "return true" here. We must let the code continue down 
+            // so the underlying Sony OS actually captures the photo!
+        }
         
         // --- FIXED: Added standard Android keycode ---
         if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
