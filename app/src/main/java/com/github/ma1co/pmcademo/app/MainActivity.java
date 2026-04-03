@@ -1180,7 +1180,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onControlWheelRotated(int direction) { 
-        // The original logic for the back wheel remains unchanged!
+        // --- NEW: INTERCEPT WHEEL TURNS FOR MATRIX NAMING ---
+        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+            char currentChar = matrixNameBuffer[nameCursorPos];
+            int idx = CHARSET.indexOf(currentChar);
+            if (idx == -1) idx = 0;
+            
+            idx += direction; // Cycle forward or backward through the alphabet
+            if (idx < 0) idx = CHARSET.length() - 1;
+            if (idx >= CHARSET.length()) idx = 0;
+            
+            matrixNameBuffer[nameCursorPos] = CHARSET.charAt(idx);
+            updateHudUI();
+            return;
+        }
+        
         if (isHudActive) {
             if (currentHudMode == 2) handleWbAdjustment(direction, 0); 
             else handleHudAdjustment(direction);
