@@ -24,7 +24,7 @@ android {
 
         // THE FIX: Forces the C++ compiler to build for the camera's older ARM architecture
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "armeabi", "armeabi-v7a"
         }
     }
     
