@@ -597,21 +597,14 @@ public void onEnterPressed() {
                 if (finalName.isEmpty()) finalName = "CUSTOM";
                 
                 recipeManager.saveSlotToVault(finalName);
-                
-                if (tvTopStatus != null) {
-                    tvTopStatus.setText("SAVED TO VAULT: " + finalName);
-                    tvTopStatus.setTextColor(Color.GREEN);
-                }
+                Toast.makeText(MainActivity.this, "SAVED TO VAULT: " + finalName, Toast.LENGTH_SHORT).show();
                 isHudActive = false; // Exit HUD after saving
             } else {
                 if (hudSelection == 0) {
                     // ACTION: LOAD SELECTED RECIPE INTO WORKSPACE
                     if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
-                        if (tvTopStatus != null) {
-                            tvTopStatus.setText("LOADED: " + vaultItems.get(vaultIndex).profileName);
-                            tvTopStatus.setTextColor(Color.GREEN);
-                        }
+                        Toast.makeText(MainActivity.this, "LOADED: " + vaultItems.get(vaultIndex).profileName, Toast.LENGTH_SHORT).show();
                     }
                     isHudActive = false; // Exit HUD after loading
                 } else if (hudSelection == 1) {
@@ -624,19 +617,21 @@ public void onEnterPressed() {
                 } else if (hudSelection == 2) {
                     // ACTION: RESET WORKSPACE
                     recipeManager.resetCurrentSlot();
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("WORKSPACE RESET TO DEFAULTS");
-                        tvTopStatus.setTextColor(Color.GREEN);
-                    }
+                    Toast.makeText(MainActivity.this, "WORKSPACE RESET TO DEFAULTS", Toast.LENGTH_SHORT).show();
                     isHudActive = false; // Exit HUD after reset
                 }
             }
             
-            // Cleanup and return to menu
-            hudOverlayContainer.setVisibility(isHudActive ? View.VISIBLE : View.GONE);
+            // --- FIXED: CLEANUP AND RESTORE MENU ---
             if (!isHudActive) { 
+                hudOverlayContainer.setVisibility(View.GONE);
+                if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
+                mainUIContainer.setVisibility(View.GONE);
+                menuContainer.setVisibility(View.VISIBLE); // Bring the menu back!
                 recipeManager.savePreferences(); 
                 renderMenu(); 
+            } else {
+                hudOverlayContainer.setVisibility(View.VISIBLE);
             }
             return;
         }
@@ -833,14 +828,13 @@ public void onEnterPressed() {
                 hudSelection--;
                 
                 // --- NAVIGATION WRAP LOGIC ---
-                // Matrix mode (0) allows selection to go up to -1 (The Preset Bar)
                 int minIdx = (currentHudMode == 0) ? -1 : 0;
                 
                 if (hudSelection < minIdx) {
                     // Wrap to the bottom based on how many cells are in the current mode
                     if (currentHudMode == 0) hudSelection = 8;
                     else if (currentHudMode == 1) hudSelection = 5;
-                    else if (currentHudMode == 3) hudSelection = 2;
+                    else if (currentHudMode == 3 || currentHudMode == 10) hudSelection = 2; // --- FIXED ---
                     else if (currentHudMode == 4 || currentHudMode == 6) hudSelection = 1;
                     else hudSelection = 0;
                 }
@@ -918,12 +912,11 @@ public void onEnterPressed() {
                 int maxIdx = 0;
                 if (currentHudMode == 0) maxIdx = 8;
                 else if (currentHudMode == 1) maxIdx = 5;
-                else if (currentHudMode == 3) maxIdx = 2;
+                else if (currentHudMode == 3 || currentHudMode == 10) maxIdx = 2; // --- FIXED ---
                 else if (currentHudMode == 4 || currentHudMode == 6) maxIdx = 1;
 
                 // --- NAVIGATION WRAP LOGIC ---
                 if (hudSelection > maxIdx) {
-                    // If Matrix mode, wrap back to the Preset Bar (-1). Others wrap to 0.
                     hudSelection = (currentHudMode == 0) ? -1 : 0;
                 }
                 updateHudUI();
@@ -1092,7 +1085,7 @@ public void onEnterPressed() {
                 int maxSlots = 0;
                 if (currentHudMode == 0) maxSlots = 8;
                 else if (currentHudMode == 1) maxSlots = 5;
-                else if (currentHudMode == 3) maxSlots = 2;
+                else if (currentHudMode == 3 || currentHudMode == 10) maxSlots = 2; // --- FIXED: Mode 10 has 3 cells ---
                 else if (currentHudMode == 4 || currentHudMode == 5 || currentHudMode == 6 || currentHudMode == 8) maxSlots = 1;
                 
                 hudSelection = Math.min(maxSlots, hudSelection + 1);
@@ -2069,6 +2062,11 @@ public void onEnterPressed() {
             // Cycle through recipes in the vault
             if (hudSelection == 0 && !vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                 vaultIndex = (vaultIndex + dir + vaultItems.size()) % vaultItems.size();
+                
+                // --- FIXED: FLUID LIVE PREVIEW ---
+                // Instantly copy the hovered recipe to the workspace so they see the live-view change
+                recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
+                triggerLutPreload(); 
             }
         }
         
@@ -2999,7 +2997,9 @@ public void onEnterPressed() {
         
         // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
-            tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+            // --- FIXED: Clearer Identity ---
+            int slotNum = recipeManager.getCurrentSlot() + 1;
+            tvTopStatus.setText("WORKSPACE " + slotNum + ": " + customName + "\n" + (isReady ? "READY" : "LOADING.."));
             
             if (mDialMode == DIAL_MODE_RTL) {
                 tvTopStatus.setTextColor(Color.WHITE); 
