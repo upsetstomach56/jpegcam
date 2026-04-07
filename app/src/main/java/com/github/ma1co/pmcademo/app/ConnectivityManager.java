@@ -46,7 +46,7 @@ public class ConnectivityManager {
         this.listener = listener;
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        // Standard initialization
+        // Standard init
         this.directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
         this.server = new HttpServer(context);
     }
@@ -65,9 +65,9 @@ public class ConnectivityManager {
     }
 
     public void startHomeWifi() {
-        stopNetworking(); 
+        stopNetworking(); // Always clear previous attempts to prevent crashes
         
-        // SONY FIX: Check for saved networks to prevent hanging search loop if empty
+        // Safety: If no networks are saved in Sony's original settings, Android will hang
         List<WifiConfiguration> configs = wifiManager.getConfiguredNetworks();
         if (configs == null || configs.isEmpty()) {
             updateStatus("WIFI", "No Saved Networks Found");
@@ -78,7 +78,7 @@ public class ConnectivityManager {
         updateStatus("WIFI", "Connecting...");
         
         wifiReceiver = new BroadcastReceiver() {
-            int attempts = 0; 
+            int timeoutCounter = 0;
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (!isHomeWifiRunning) return;
@@ -94,12 +94,9 @@ public class ConnectivityManager {
                             updateStatus("WIFI", "http://" + ipAddr + ":" + HttpServer.PORT);
                             startServer(); setAutoPowerOffMode(false); 
                         }
-                    } else {
-                        attempts++;
-                        if (attempts > 20) { // Timeout after ~30 seconds
-                            updateStatus("WIFI", "Timeout: Check Settings");
-                            stopNetworking();
-                        }
+                    } else if (++timeoutCounter > 40) { // Safety timeout (~30-40s)
+                        updateStatus("WIFI", "Timed out.");
+                        stopNetworking();
                     }
                 }
             }
@@ -112,8 +109,8 @@ public class ConnectivityManager {
 
     public void startHotspot() {
         stopNetworking();
-        
-        // SONY FIX: Use the proprietary service string if standard call fails
+
+        // Sony-Specific: If the standard manager is null, try the proprietary service string
         if (directManager == null) {
             directManager = (DirectManager) context.getSystemService("sony:wifi:direct");
         }
@@ -124,14 +121,8 @@ public class ConnectivityManager {
         }
 
         isHotspotRunning = true;
-        updateStatus("HOTSPOT", "Waking Hardware...");
+        updateStatus("HOTSPOT", "Starting...");
         
-        // SONY FIX: Ensure chip is powered and give it a moment to stabilize
-        if (!wifiManager.isWifiEnabled()) {
-            wifiManager.setWifiEnabled(true);
-            try { Thread.sleep(500); } catch (Exception e) {} 
-        }
-
         directStateReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -149,6 +140,7 @@ public class ConnectivityManager {
             public void onReceive(Context context, Intent intent) {
                 DirectConfiguration config = intent.getParcelableExtra(DirectManager.EXTRA_DIRECT_CONFIG);
                 if (config != null) {
+                    // Hotspot IP is almost always 192.168.122.1 on these cameras
                     updateStatus("HOTSPOT", "http://192.168.122.1:8080");
                     startServer(); setAutoPowerOffMode(false); 
                 }
@@ -158,6 +150,11 @@ public class ConnectivityManager {
         context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
         context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
 
+        if (!wifiManager.isWifiEnabled()) {
+            wifiManager.setWifiEnabled(true);
+            // Give the radio 500ms to physically power up before calling directManager
+            try { Thread.sleep(500); } catch (Exception e) {} 
+        }
         directManager.setDirectEnabled(true);
     }
 
