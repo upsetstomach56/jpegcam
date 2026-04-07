@@ -140,36 +140,6 @@ public class ConnectivityManager {
         // Print the hardware reality directly to the screen
         updateStatus("HOTSPOT", debug.toString());
     }
-        
-        groupCreateSuccessReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                DirectConfiguration config = intent.getParcelableExtra(DirectManager.EXTRA_DIRECT_CONFIG);
-                if (config != null) {
-                    // Hotspot IP is standardized for Sony cameras
-                    updateStatus("HOTSPOT", "http://192.168.122.1:8080");
-                    startServer();
-                    setAutoPowerOffMode(false); 
-                }
-            }
-        };
-
-        groupCreateFailureReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                updateStatus("HOTSPOT", "Group Creation Failed");
-                stopNetworking();
-            }
-        };
-        
-        context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
-        context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
-        context.registerReceiver(groupCreateFailureReceiver, new IntentFilter(DirectManager.GROUP_CREATE_FAILURE_ACTION));
-
-        // Power-on sequence: Wi-Fi radio first, then the Direct service
-        if (!wifiManager.isWifiEnabled()) wifiManager.setWifiEnabled(true);
-        directManager.setDirectEnabled(true);
-    }
 
     public void stopNetworking() {
         if (server != null && server.isAlive()) server.stop();
