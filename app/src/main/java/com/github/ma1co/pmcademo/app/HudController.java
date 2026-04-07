@@ -240,6 +240,10 @@ public class HudController {
             else if (mode == 3)                         selection = 2;
             else if (mode == 10)                        selection = 3;
             else if (mode == 4 || mode == 6)            selection = 1;
+            else if (mode == 5) {
+                String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
+                selection = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+            }
             else                                        selection = 0;
         }
         refresh(); return true;
@@ -255,6 +259,10 @@ public class HudController {
         else if (mode == 3)                         maxIdx = 2;
         else if (mode == 10)                        maxIdx = 3;
         else if (mode == 4 || mode == 6)            maxIdx = 1;
+        else if (mode == 5) {
+            String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
+            maxIdx = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+        }
         if (selection > maxIdx) selection = (mode == 0) ? -1 : 0;
         refresh(); return true;
     }
@@ -273,7 +281,11 @@ public class HudController {
         else if (mode == 1)                                        maxSlots = 5;
         else if (mode == 3)                                        maxSlots = 2;
         else if (mode == 10)                                       maxSlots = 3;
-        else if (mode == 4||mode==5||mode==6||mode==8)             maxSlots = 1;
+        else if (mode == 4 || mode == 6)                           maxSlots = 1;
+        else if (mode == 5) {
+            String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
+            maxSlots = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+        }
         selection = Math.min(maxSlots, selection + 1); refresh(); return true;
     }
 
@@ -351,7 +363,11 @@ public class HudController {
                 }
             } else if (selection == 1 && "toy-camera".equals(eff)) { p.vignetteHardware = Math.max(-16,Math.min(16,p.vignetteHardware+dir)); }
         } else if (mode == 6) {
-            if (selection == 0) { String[] styles={"standard","vivid","portrait","landscape","mono","sunset","sepia"}; int idx=0; for(int i=0;i<styles.length;i++) if(styles[i].equalsIgnoreCase(p.colorMode)) idx=i; p.colorMode=styles[(idx+dir+styles.length)%styles.length]; }
+            if (selection == 0) { 
+                String[] styles={"standard","vivid","neutral","clear","deep","light","portrait","landscape","sunset","night scene","autumn leaves","black & white","sepia"}; 
+                int idx=0; for(int i=0;i<styles.length;i++) if(styles[i].equalsIgnoreCase(p.colorMode)) idx=i; 
+                p.colorMode=styles[(idx+dir+styles.length)%styles.length]; 
+            }
             else if (selection == 1) p.sharpnessGain = Math.max(-50,Math.min(50,p.sharpnessGain + dir*5));
         } else if (mode == 7) { p.whiteBalance = MenuController.cycleKelvin(p.whiteBalance, dir);
         } else if (mode == 8) {
