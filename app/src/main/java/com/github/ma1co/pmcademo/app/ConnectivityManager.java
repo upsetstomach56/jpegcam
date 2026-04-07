@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.NetworkInfo;
+import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 
@@ -20,7 +21,6 @@ import java.util.List;
 public class ConnectivityManager {
     private Context context;
     private WifiManager wifiManager;
-    // Explicitly use the fully qualified name to avoid colliding with our own class name
     private android.net.ConnectivityManager connManager;
     private DirectManager directManager;
     private HttpServer server;
@@ -45,8 +45,8 @@ public class ConnectivityManager {
         this.context = context;
         this.listener = listener;
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        // Fully qualify the Android system service
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        // Standard initialization
         this.directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
         this.server = new HttpServer(context);
     }
@@ -56,9 +56,6 @@ public class ConnectivityManager {
     public boolean isHomeWifiRunning() { return isHomeWifiRunning; }
     public boolean isHotspotRunning() { return isHotspotRunning; }
 
-    /**
-     * Disables the camera's aggressive auto-power-off during network operations.
-     */
     private void setAutoPowerOffMode(boolean enable) {
         String mode = enable ? "APO/NORMAL" : "APO/NO";
         Intent intent = new Intent();
@@ -68,12 +65,20 @@ public class ConnectivityManager {
     }
 
     public void startHomeWifi() {
-        stopNetworking(); // Always clear old states first
+        stopNetworking(); 
+        
+        // SONY FIX: Check for saved networks to prevent hanging search loop if empty
+        List<WifiConfiguration> configs = wifiManager.getConfiguredNetworks();
+        if (configs == null || configs.isEmpty()) {
+            updateStatus("WIFI", "No Saved Networks Found");
+            return;
+        }
+
         isHomeWifiRunning = true;
         updateStatus("WIFI", "Connecting...");
         
         wifiReceiver = new BroadcastReceiver() {
-            int attempts = 0; // Watchdog counter
+            int attempts = 0; 
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (!isHomeWifiRunning) return;
@@ -91,8 +96,8 @@ public class ConnectivityManager {
                         }
                     } else {
                         attempts++;
-                        if (attempts > 20) { // Approx 20-30 seconds
-                            updateStatus("WIFI", "Error: No Network Found");
+                        if (attempts > 20) { // Timeout after ~30 seconds
+                            updateStatus("WIFI", "Timeout: Check Settings");
                             stopNetworking();
                         }
                     }
@@ -108,19 +113,25 @@ public class ConnectivityManager {
     public void startHotspot() {
         stopNetworking();
         
-        // Lazy Load: Re-check hardware if it failed at boot
+        // SONY FIX: Use the proprietary service string if standard call fails
         if (directManager == null) {
-            directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+            directManager = (DirectManager) context.getSystemService("sony:wifi:direct");
         }
 
         if (directManager == null) {
-            updateStatus("HOTSPOT", "Hardware Error (Busy)");
+            updateStatus("HOTSPOT", "Hardware Busy: Retry");
             return;
         }
 
         isHotspotRunning = true;
-        updateStatus("HOTSPOT", "Starting...");
+        updateStatus("HOTSPOT", "Waking Hardware...");
         
+        // SONY FIX: Ensure chip is powered and give it a moment to stabilize
+        if (!wifiManager.isWifiEnabled()) {
+            wifiManager.setWifiEnabled(true);
+            try { Thread.sleep(500); } catch (Exception e) {} 
+        }
+
         directStateReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -147,7 +158,6 @@ public class ConnectivityManager {
         context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
         context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
 
-        if (!wifiManager.isWifiEnabled()) wifiManager.setWifiEnabled(true);
         directManager.setDirectEnabled(true);
     }
 
@@ -161,8 +171,7 @@ public class ConnectivityManager {
         if (isHotspotRunning) {
             try { context.unregisterReceiver(directStateReceiver); } catch (Exception e) {}
             try { context.unregisterReceiver(groupCreateSuccessReceiver); } catch (Exception e) {}
-            try { context.unregisterReceiver(wifiReceiver); } catch (Exception e) {} 
-            directManager.setDirectEnabled(false);
+            try { if (directManager != null) directManager.setDirectEnabled(false); } catch (Exception e) {}
             isHotspotRunning = false;
         }
         updateStatus("WIFI", "Press ENTER to Start");
