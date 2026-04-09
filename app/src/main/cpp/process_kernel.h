@@ -15,7 +15,7 @@
 // vignette, 0, 5
 // grain, 0, 5
 // grainSize, 0, 2
-// diffusion, 0, 2
+// emulsion, 0, 2
 // === END_METADATA ===
 
 // --- SHARED HELPERS ---
@@ -38,186 +38,107 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 // ==========================================
-// FILM DIFFUSION PRE-PASS
+// TRUE 2D EMULSION SIMULATION (Dye Cloud Softening)
 //
-// Simulates the lower spatial resolution of film's color dye layers
-// compared to the sharp silver-halide luminance layer. A bi-directional
-// IIR low-pass is applied to Cb and Cr only — luma stays razor-sharp.
+// Replaces 1D mathematical diffusion with a physical emulation of film.
+// Uses a 3-Row Rolling Buffer to apply a 3x3 micro-blur.
 //
-// This causes color edges to "bloom" into each other organically, giving
-// skin tones a silky quality and eliminating the clinical "digital grid"
-// look of a modern sensor — without any visible blur.
-//
-// SOFT (1): ~3px effective chroma blur radius (forward + backward IIR)
-// RICH (2): Stronger chroma blur + very gentle 4% forward luma neighbor
-//           blend that breaks the perfect pixel grid of the sensor.
-//
-// chroma_work: caller-allocated buffer of (width * 2) int16_t.
-// Memory cost: ~24KB at 6000px width. Allocated once per image, not per row.
+// Scaling: Dynamic parametric weights ensure the perceptual blur radius
+//          is identical across PROXY, HALF, and FULL resolutions.
+// Color Space: Processed in YUV. Strong matrix applied to Chroma (dye clouds),
+//              Microscopic matrix applied to Luma (silver-halide roll-off).
 // ==========================================
-inline void apply_film_diffusion(
-    uint8_t* row, int width, bool is_yuv, int diffusion,
-    int16_t* chroma_work)
+inline void apply_emulsion(
+    const uint8_t* prev_row, const uint8_t* curr_row, const uint8_t* next_row, uint8_t* out_row,
+    int width, bool is_yuv, int emulsion)
 {
-    if (diffusion == 0 || width < 4) return;
+    if (emulsion == 0 || width < 1) return;
 
-    // IIR alpha: higher = more memory = longer blur tail.
-    // Dynamically scale based on image width so PROXY/HALF/FULL have the same visual radius.
-    int base_inv_alpha = (diffusion == 1) ? 46 : 36;
-    int inv_alpha = (base_inv_alpha * 6000) / width;
-    if (inv_alpha > 256) inv_alpha = 256;
-    const int alpha = 256 - inv_alpha;
-    int acc;
+    // Dynamic Parametric Weights based on Image Width (Scaling for PROXY/FULL)
+    // At 6000px, center weight is lower (more blur). At 1500px, center weight is higher (less blur)
+    // to maintain the same visual perceptual radius.
+    int cw_chroma_base = (emulsion == 1) ? 64 : 32;
+    int cw_luma_base   = (emulsion == 1) ? 220 : 190;
 
-    if (is_yuv) {
-        // --- YCbCr path: row bytes are [Y, Cb, Cr, Y, Cb, Cr, ...] ---
-        // Extract signed chroma to working buffer
-        for (int x = 0; x < width; x++) {
-            chroma_work[x * 2]     = (int16_t)((int)row[x * 3 + 1] - 128);
-            chroma_work[x * 2 + 1] = (int16_t)((int)row[x * 3 + 2] - 128);
-        }
+    int cw_c = 256 - (((256 - cw_chroma_base) * width) / 6000);
+    if (cw_c > 256) cw_c = 256; if (cw_c < 0) cw_c = 0;
+    
+    int cw_l = 256 - (((256 - cw_luma_base) * width) / 6000);
+    if (cw_l > 256) cw_l = 256; if (cw_l < 0) cw_l = 0;
 
-        // === Cb: forward IIR (left to right) ===
-        acc = chroma_work[0];
-        for (int x = 1; x < width; x++) {
-            acc = (acc * alpha + (int)chroma_work[x * 2] * inv_alpha) / 256;
-            chroma_work[x * 2] = (int16_t)acc;
-        }
-        // === Cb: backward IIR (right to left) — makes the blur symmetric ===
-        acc = chroma_work[(width - 1) * 2];
-        for (int x = width - 2; x >= 0; x--) {
-            acc = (acc * alpha + (int)chroma_work[x * 2] * inv_alpha) / 256;
-            chroma_work[x * 2] = (int16_t)acc;
-        }
+    // Distribute remaining weight to neighbors to ensure PERFECT sum to 256
+    // 4 sides get slightly more weight than 4 corners (approximate circle/gaussian)
+    int rem_c = 256 - cw_c;
+    int side_c = (rem_c * 5) / 32; 
+    int diag_c = (rem_c * 3) / 32; 
+    cw_c = 256 - (side_c * 4 + diag_c * 4); // Re-clamp center to ensure perfect normalization
 
-        // === Cr: forward IIR ===
-        acc = chroma_work[1];
-        for (int x = 1; x < width; x++) {
-            acc = (acc * alpha + (int)chroma_work[x * 2 + 1] * inv_alpha) / 256;
-            chroma_work[x * 2 + 1] = (int16_t)acc;
-        }
-        // === Cr: backward IIR ===
-        acc = chroma_work[(width - 1) * 2 + 1];
-        for (int x = width - 2; x >= 0; x--) {
-            acc = (acc * alpha + (int)chroma_work[x * 2 + 1] * inv_alpha) / 256;
-            chroma_work[x * 2 + 1] = (int16_t)acc;
-        }
+    int rem_l = 256 - cw_l;
+    int side_l = (rem_l * 5) / 32;
+    int diag_l = (rem_l * 3) / 32;
+    cw_l = 256 - (side_l * 4 + diag_l * 4);
 
-        // Write blurred chroma back. Luma (row[x*3]) is completely untouched.
-        for (int x = 0; x < width; x++) {
-            row[x * 3 + 1] = (uint8_t)CLAMP(128 + (int)chroma_work[x * 2]);
-            row[x * 3 + 2] = (uint8_t)CLAMP(128 + (int)chroma_work[x * 2 + 1]);
-        }
+    for (int x = 0; x < width; x++) {
+        // Edge clamping for X-axis
+        int xl = (x > 0) ? x - 1 : 0;
+        int xr = (x < width - 1) ? x + 1 : width - 1;
 
-        // RICH mode: add a very gentle forward luma neighbor blend.
-        // At 4% blend ratio this is nearly imperceptible as "blur" but
-        // perceptually removes the clinical "perfect pixel" edge of the sensor.
-        if (diffusion >= 2) {
-            int prev_y = (int)row[0];
-            for (int x = 1; x < width; x++) {
-                int cur_y = (int)row[x * 3];
-                int new_y = (cur_y * 246 + prev_y * 10) / 256;
-                prev_y = cur_y;     // save original before overwriting
-                row[x * 3] = (uint8_t)new_y;
-            }
-        }
+        int xl3 = xl * 3; int x3 = x * 3; int xr3 = xr * 3;
 
-    } else {
-        // --- RGB path: convert to YCbCr, blur Cb/Cr, reconstruct ---
-        //
-        // By blurring chroma BEFORE the LUT runs, we shift each pixel's
-        // position in 3D RGB space slightly toward its neighbors' hues.
-        // The trilinear LUT interpolation then operates on these "dye-blurred"
-        // positions, causing the LUT's color response to bleed at color
-        // transitions — exactly how film dye layers respond to light.
-        //
-        // BT.601 forward coefficients (integer approximation, full range):
-        //   Cb = (-43*R - 85*G + 128*B) / 256
-        //   Cr = (128*R - 107*G - 21*B) / 256
-        for (int x = 0; x < width; x++) {
-            int r = row[x * 3], g = row[x * 3 + 1], b = row[x * 3 + 2];
-            chroma_work[x * 2]     = (int16_t)((-43 * r - 85 * g + 128 * b) / 256);
-            chroma_work[x * 2 + 1] = (int16_t)((128 * r - 107 * g - 21 * b) / 256);
-        }
+        int r_tl = prev_row[xl3], g_tl = prev_row[xl3+1], b_tl = prev_row[xl3+2];
+        int r_tc = prev_row[x3],  g_tc = prev_row[x3+1],  b_tc = prev_row[x3+2];
+        int r_tr = prev_row[xr3], g_tr = prev_row[xr3+1], b_tr = prev_row[xr3+2];
+        
+        int r_cl = curr_row[xl3], g_cl = curr_row[xl3+1], b_cl = curr_row[xl3+2];
+        int r_cc = curr_row[x3],  g_cc = curr_row[x3+1],  b_cc = curr_row[x3+2];
+        int r_cr = curr_row[xr3], g_cr = curr_row[xr3+1], b_cr = curr_row[xr3+2];
+        
+        int r_bl = next_row[xl3], g_bl = next_row[xl3+1], b_bl = next_row[xl3+2];
+        int r_bc = next_row[x3],  g_bc = next_row[x3+1],  b_bc = next_row[x3+2];
+        int r_br = next_row[xr3], g_br = next_row[xr3+1], b_br = next_row[xr3+2];
 
-        // === Cb: forward + backward IIR ===
-        acc = chroma_work[0];
-        for (int x = 1; x < width; x++) {
-            acc = (acc * alpha + (int)chroma_work[x * 2] * inv_alpha) / 256;
-            chroma_work[x * 2] = (int16_t)acc;
-        }
-        acc = chroma_work[(width - 1) * 2];
-        for (int x = width - 2; x >= 0; x--) {
-            acc = (acc * alpha + (int)chroma_work[x * 2] * inv_alpha) / 256;
-            chroma_work[x * 2] = (int16_t)acc;
-        }
+        if (is_yuv) {
+            // Already YUV: R=Y, G=Cb, B=Cr
+            int y  = (r_cc * cw_l + (r_tc + r_bc + r_cl + r_cr) * side_l + (r_tl + r_tr + r_bl + r_br) * diag_l) / 256;
+            int cb = (g_cc * cw_c + (g_tc + g_bc + g_cl + g_cr) * side_c + (g_tl + g_tr + g_bl + g_br) * diag_c) / 256;
+            int cr = (b_cc * cw_c + (b_tc + b_bc + b_cl + b_cr) * side_c + (b_tl + b_tr + b_bl + b_br) * diag_c) / 256;
+            
+            out_row[x3]   = (uint8_t)CLAMP(y);
+            out_row[x3+1] = (uint8_t)CLAMP(cb);
+            out_row[x3+2] = (uint8_t)CLAMP(cr);
+        } else {
+            // RGB Path: Convert 3x3 neighborhood to YCbCr on the fly to avoid
+            // blurring Luma and Chroma with the same weights.
+            auto ycbcr = [](int r, int g, int b, int& y, int& cb, int& cr) {
+                y  = (77 * r + 150 * g + 29 * b) / 256;
+                cb = (-43 * r - 85 * g + 128 * b) / 256;
+                cr = (128 * r - 107 * g - 21 * b) / 256;
+            };
 
-        // === Cr: forward + backward IIR ===
-        acc = chroma_work[1];
-        for (int x = 1; x < width; x++) {
-            acc = (acc * alpha + (int)chroma_work[x * 2 + 1] * inv_alpha) / 256;
-            chroma_work[x * 2 + 1] = (int16_t)acc;
-        }
-        acc = chroma_work[(width - 1) * 2 + 1];
-        for (int x = width - 2; x >= 0; x--) {
-            acc = (acc * alpha + (int)chroma_work[x * 2 + 1] * inv_alpha) / 256;
-            chroma_work[x * 2 + 1] = (int16_t)acc;
-        }
+            int y_tl, cb_tl, cr_tl; ycbcr(r_tl, g_tl, b_tl, y_tl, cb_tl, cr_tl);
+            int y_tc, cb_tc, cr_tc; ycbcr(r_tc, g_tc, b_tc, y_tc, cb_tc, cr_tc);
+            int y_tr, cb_tr, cr_tr; ycbcr(r_tr, g_tr, b_tr, y_tr, cb_tr, cr_tr);
+            
+            int y_cl, cb_cl, cr_cl; ycbcr(r_cl, g_cl, b_cl, y_cl, cb_cl, cr_cl);
+            int y_cc, cb_cc, cr_cc; ycbcr(r_cc, g_cc, b_cc, y_cc, cb_cc, cr_cc);
+            int y_cr, cb_cr, cr_cr; ycbcr(r_cr, g_cr, b_cr, y_cr, cb_cr, cr_cr);
+            
+            int y_bl, cb_bl, cr_bl; ycbcr(r_bl, g_bl, b_bl, y_bl, cb_bl, cr_bl);
+            int y_bc, cb_bc, cr_bc; ycbcr(r_bc, g_bc, b_bc, y_bc, cb_bc, cr_bc);
+            int y_br, cb_br, cr_br; ycbcr(r_br, g_br, b_br, y_br, cb_br, cr_br);
 
-        // DELTA RECONSTRUCTION — eliminates the systematic green cast from the
-        // original "Y + blurred chroma" approach.
-        //
-        // Root cause of green cast: the old code discarded original RGB and
-        // rebuilt from Y + Cb_blur + Cr_blur using >>8 truncation. The G channel
-        // is computed by SUBTRACTING two truncated terms, so both always
-        // round toward -inf, making G ~0.5-1.5 counts HIGH every pixel.
-        // R and B were correspondingly biased low — a systematic green cast.
-        //
-        // Fix: compute original Cb/Cr fresh from unmodified RGB, find the DELTA
-        // the IIR blurring applied, and add only that delta back to original RGB.
-        // When delta is zero (no color neighbors differ), pixel is bit-for-bit
-        // unchanged — no rounding error, no green cast, no luminance drift.
-        for (int x = 0; x < width; x++) {
-            int r = row[x * 3], g = row[x * 3 + 1], b = row[x * 3 + 2];
-            // Original Cb/Cr for this pixel (same formula as the extraction above)
-            int cb_orig = (-43 * r - 85 * g + 128 * b) / 256;
-            int cr_orig = (128 * r - 107 * g -  21 * b) / 256;
-            // Blurred Cb/Cr from the bidirectional IIR
-            int cb_blur = (int)chroma_work[x * 2];
-            int cr_blur = (int)chroma_work[x * 2 + 1];
-            // How much did blurring shift the chroma for this pixel?
-            int dcb = cb_blur - cb_orig;
-            int dcr = cr_blur - cr_orig;
-            // Apply only the delta to original RGB — zero delta = pixel unchanged
-            row[x * 3]     = (uint8_t)CLAMP(r + ((359 * dcr) / 256));
-            row[x * 3 + 1] = (uint8_t)CLAMP(g - ((88  * dcb) / 256) - ((183 * dcr) / 256));
-            row[x * 3 + 2] = (uint8_t)CLAMP(b + ((453 * dcb) / 256));
-        }
+            int y  = (y_cc * cw_l + (y_tc + y_bc + y_cl + y_cr) * side_l + (y_tl + y_tr + y_bl + y_br) * diag_l) / 256;
+            int cb = (cb_cc * cw_c + (cb_tc + cb_bc + cb_cl + cb_cr) * side_c + (cb_tl + cb_tr + cb_bl + cb_br) * diag_c) / 256;
+            int cr = (cr_cc * cw_c + (cr_tc + cr_bc + cr_cl + cr_cr) * side_c + (cr_tl + cr_tr + cr_bl + cr_br) * diag_c) / 256;
 
-        // RICH mode: 4% forward luma neighbor blend, luma-preserving.
-        // Blends each pixel's color slightly with its left neighbor while
-        // rescaling to maintain the original brightness — creates organic
-        // micro-texture at color edges without darkening the image.
-        if (diffusion >= 2) {
-            int prev_r = (int)row[0], prev_g = (int)row[1], prev_b = (int)row[2];
-            for (int x = 1; x < width; x++) {
-                int cur_r = (int)row[x * 3], cur_g = (int)row[x * 3 + 1], cur_b = (int)row[x * 3 + 2];
-                int orig_y = (77 * cur_r + 150 * cur_g + 29 * cur_b) / 256;
-                // 96% self + 4% left neighbor
-                int blen_r = (cur_r * 246 + prev_r * 10) / 256;
-                int blen_g = (cur_g * 246 + prev_g * 10) / 256;
-                int blen_b = (cur_b * 246 + prev_b * 10) / 256;
-                // Luma-preserving rescale: keep brightness, only change texture
-                int blen_y = (77 * blen_r + 150 * blen_g + 29 * blen_b) / 256;
-                if (blen_y > 0 && blen_y != orig_y) {
-                    int sc = (orig_y * 256) / blen_y;
-                    blen_r = CLAMP((blen_r * sc) / 256);
-                    blen_g = CLAMP((blen_g * sc) / 256);
-                    blen_b = CLAMP((blen_b * sc) / 256);
-                }
-                prev_r = cur_r; prev_g = cur_g; prev_b = cur_b;
-                row[x * 3] = (uint8_t)blen_r; row[x * 3 + 1] = (uint8_t)blen_g; row[x * 3 + 2] = (uint8_t)blen_b;
-            }
+            // DELTA RECONSTRUCTION to avoid rounding errors and systematic green casts
+            int dy  = y  - y_cc;
+            int dcb = cb - cb_cc;
+            int dcr = cr - cr_cc;
+
+            out_row[x3]   = (uint8_t)CLAMP(r_cc + dy + ((359 * dcr) / 256));
+            out_row[x3+1] = (uint8_t)CLAMP(g_cc + dy - ((88 * dcb) / 256) - ((183 * dcr) / 256));
+            out_row[x3+2] = (uint8_t)CLAMP(b_cc + dy + ((453 * dcb) / 256));
         }
     }
 }

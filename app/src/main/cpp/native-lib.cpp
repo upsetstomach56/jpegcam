@@ -148,7 +148,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
     jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
     jint shadowToe, jint subtractiveSat, jint halation,
-    jint diffusion, jint jpegQuality) {
+    jint emulsion, jint jpegQuality) {
 
     long long start_time = get_time_ms();
 
@@ -259,7 +259,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long vig_coef    = get_vig_coef(vignette, max_dist_sq);
     int opac_mapped   = (opacity * 256) / 100;
 
-    unsigned char* row_buf = (unsigned char*)malloc(row_stride);
+    // --- MEMORY-SAFE 3-ROW ROLLING BUFFER (~72KB overhead) ---
+    // We allocate 4 row buffers: prev, curr, next (original data) and out (processed data)
+    unsigned char* buf_prev = (unsigned char*)malloc(row_stride);
+    unsigned char* buf_curr = (unsigned char*)malloc(row_stride);
+    unsigned char* buf_next = (unsigned char*)malloc(row_stride);
+    unsigned char* buf_out  = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
 
     int map[256];
@@ -274,30 +279,34 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         generate_rolloff_lut(rolloff_lut, rollOff);
     }
 
-    // --- FILM DIFFUSION WORKING BUFFER ---
-    // Allocated once here (not per-row) to keep malloc overhead out of the loop.
-    // Size: width * 2 int16_t values for Cb and Cr channels.
-    // At 6000px: 24KB. At 1/4 res (proxy): ~6KB. Safe on all targets.
-    int16_t* chroma_work = NULL;
-    if (diffusion > 0) {
-        chroma_work = (int16_t*)malloc(cinfo_d.output_width * 2 * sizeof(int16_t));
-    }
-
     // --- GRAIN SEED ---
     uint32_t seed = (uint32_t)(start_time & 0xFFFFFFFF);
     if (seed == 0) seed = 98765;
 
-    // --- MAIN PROCESSING LOOP ---
-    while (cinfo_d.output_scanline < cinfo_d.output_height) {
-        int abs_y = cinfo_d.output_scanline;
-        row_pointer[0] = row_buf;
+    // --- PRE-LOAD BUFFER ---
+    if (cinfo_d.output_height > 0) {
+        row_pointer[0] = buf_curr;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+        memcpy(buf_prev, buf_curr, row_stride); // Edge Clamp: duplicate first row
+    }
+    if (cinfo_d.output_height > 1) {
+        row_pointer[0] = buf_next;
+        jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+    } else {
+        memcpy(buf_next, buf_curr, row_stride); // Edge Clamp: duplicate if 1px high
+    }
 
-        // Film diffusion pre-pass: blurs chroma before any other effect runs.
-        // Must execute before process_row_rgb/yuv so the LUT and effects
-        // see the dye-blurred pixel values, not the sharp sensor output.
-        if (diffusion > 0 && chroma_work != NULL) {
-            apply_film_diffusion(row_buf, cinfo_d.output_width, !use_rgb_path, diffusion, chroma_work);
+    // --- MAIN PROCESSING LOOP ---
+    int processed_rows = 0;
+    while (processed_rows < cinfo_d.output_height) {
+        int abs_y = processed_rows;
+        
+        // Copy original curr data into out buffer to safely modify it
+        memcpy(buf_out, buf_curr, row_stride);
+
+        // Emulsion pre-pass: applies true 2D dye-cloud softening
+        if (emulsion > 0) {
+            apply_emulsion(buf_prev, buf_curr, buf_next, buf_out, cinfo_d.output_width, !use_rgb_path, emulsion);
         }
 
         if (use_rgb_path) {
@@ -305,7 +314,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // PATH A: RGB + LUT + ANALOG PHYSICS
             // ==========================================
             process_row_rgb(
-                row_buf, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                buf_out, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                 grain, grainSize, seed,
                 opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
@@ -315,18 +324,34 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // PATH B: YUV EXPRESSWAY
             // ==========================================
             process_row_yuv(
-                row_buf, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                buf_out, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                 grain, grainSize, seed,
                 rolloff_lut
             );
         }
 
+        row_pointer[0] = buf_out;
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
+
+        // Roll the buffers
+        unsigned char* temp = buf_prev;
+        buf_prev = buf_curr;
+        buf_curr = buf_next;
+        buf_next = temp; // Re-use the old prev buffer for the new row
+
+        if (cinfo_d.output_scanline < cinfo_d.output_height) {
+            row_pointer[0] = buf_next;
+            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+        } else {
+            // Edge Clamp: duplicate last row
+            memcpy(buf_next, buf_curr, row_stride);
+        }
+        
+        processed_rows++;
     }
 
-    if (chroma_work) free(chroma_work);
-    free(row_buf);
+    free(buf_prev); free(buf_curr); free(buf_next); free(buf_out);
     jpeg_finish_compress(&cinfo_c);  jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
     fclose(infile); fclose(outfile);

@@ -52,11 +52,10 @@ public class RTLProfile {
     public int subtractiveSat = 0;
     public int halation = 0;
 
-    // --- Film Diffusion ---
-    // Simulates the lower spatial resolution of film dye layers vs the
-    // silver-halide luminance layer. Colors bloom into each other organically.
-    // 0 = OFF | 1 = SOFT (chroma blur only) | 2 = RICH (chroma + luma micro-diffusion)
-    public int diffusion = 0;
+    // --- Emulsion Simulation ---
+    // Simulates the physical overlap of film dye clouds using a 2D 3x3 micro-blur.
+    // 0 = OFF | 1 = STANDARD | 2 = THICK
+    public int emulsion = 0;
 
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
