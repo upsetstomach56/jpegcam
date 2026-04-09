@@ -455,6 +455,10 @@ public class MenuController {
             else if (sel == 3) p.colorChrome = Math.max(0, Math.min(2, p.colorChrome + dir));
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
+            
+            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Film Diffusion (0, 1, or 2)
+            else if (sel == 6) p.diffusion = Math.max(0, Math.min(2, p.diffusion + dir));
+            
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
             else if (sel == 2) host.setPrefFocusMeter(!host.isPrefFocusMeter());
@@ -541,7 +545,7 @@ public class MenuController {
                 String ts  = String.format("[ %+d,  %+d,  %+d ]", p.contrast, p.saturation, p.sharpness);
                 String activeName = (p.profileName != null && !p.profileName.isEmpty()) ? p.profileName : "UNNAMED";
                 setRow(0, "Recipe Slot (1-10)",  String.valueOf(rm.getCurrentSlot() + 1));
-                setRow(1, "Recipe Manager",       "< " + activeName + " >");
+                setRow(1, "Recipe Manager",      "< " + activeName + " >");
                 setRow(2, "Foundation Base",       fnd);
                 setRow(3, "Tone & Style",          ts);
                 setRow(4, "DRO (Dynamic Range)",   p.dro != null ? p.dro.toUpperCase() : "OFF");
@@ -572,13 +576,16 @@ public class MenuController {
                 setRow(3, "Grain Size",  sizeLbls[Math.max(0,Math.min(2,p.grainSize))]);
                 setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
-                ic = 6;
+                ic = 7; // CHANGED TO 7
                 setRow(0, "Highlight Roll-Off",    amtLbls[Math.max(0,Math.min(5,p.rollOff))]);
                 setRow(1, "Shadow Roll-Off (Toe)",  p.shadowToe==0?"OFF":(p.shadowToe==1?"WEAK":"FILMIC"));
                 setRow(2, "Subtractive Sat",        p.subtractiveSat==0?"OFF":(p.subtractiveSat==1?"WEAK":"HEAVY"));
                 setRow(3, "Color Chrome",           p.colorChrome==0?"OFF":(p.colorChrome==1?"WEAK":"STRONG"));
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
                 setRow(5, "Halation (Red Glow)",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
+                
+                // NEW ROW ADDED HERE
+                setRow(6, "Film Diffusion",         p.diffusion==0?"OFF":(p.diffusion==1?"SOFT":"RICH"));
             }
         }
         if (currentPage == 6) {
