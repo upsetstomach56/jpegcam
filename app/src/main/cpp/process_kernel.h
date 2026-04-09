@@ -38,107 +38,84 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 // ==========================================
-// TRUE 2D EMULSION SIMULATION (Dye Cloud Softening)
+// TRUE 2D EMULSION SIMULATION V2 (Wide-Radius)
 //
-// Replaces 1D mathematical diffusion with a physical emulation of film.
-// Uses a 3-Row Rolling Buffer to apply a 3x3 micro-blur.
+// Uses an 11-row symmetric buffer to apply a circular dye-cloud blur.
+// This ensures the softness is visible at arm's length on 24MP sensors.
 //
-// Scaling: Dynamic parametric weights ensure the perceptual blur radius
-//          is identical across PROXY, HALF, and FULL resolutions.
-// Color Space: Processed in YUV. Strong matrix applied to Chroma (dye clouds),
-//              Microscopic matrix applied to Luma (silver-halide roll-off).
+// Chroma: Wide circular blur (mimics 20-30 micron dye clouds).
+// Luma: Tight 3x3 core blur (mimics silver-halide roll-off).
 // ==========================================
-inline void apply_emulsion(
-    const uint8_t* prev_row, const uint8_t* curr_row, const uint8_t* next_row, uint8_t* out_row,
-    int width, bool is_yuv, int emulsion)
+inline void apply_emulsion_v2(
+    unsigned char** rows, uint8_t* out_row, int width, bool is_yuv, int emulsion)
 {
     if (emulsion == 0 || width < 1) return;
 
-    // Dynamic Parametric Weights based on Image Width (Scaling for PROXY/FULL)
-    // At 6000px, center weight is lower (more blur). At 1500px, center weight is higher (less blur)
-    // to maintain the same visual perceptual radius.
-    int cw_chroma_base = (emulsion == 1) ? 64 : 32;
-    int cw_luma_base   = (emulsion == 1) ? 220 : 190;
-
-    int cw_c = 256 - (((256 - cw_chroma_base) * width) / 6000);
-    if (cw_c > 256) cw_c = 256; if (cw_c < 0) cw_c = 0;
+    // Radius scaling for resolution independence (Radius 5 at FULL 24MP)
+    int radius = (width * 5) / 6000;
+    if (radius < 1) radius = 1;
+    if (radius > 5) radius = 5;
     
-    int cw_l = 256 - (((256 - cw_luma_base) * width) / 6000);
-    if (cw_l > 256) cw_l = 256; if (cw_l < 0) cw_l = 0;
+    int diameter = radius * 2 + 1;
+    int samples = diameter * diameter;
 
-    // Distribute remaining weight to neighbors to ensure PERFECT sum to 256
-    // 4 sides get slightly more weight than 4 corners (approximate circle/gaussian)
-    int rem_c = 256 - cw_c;
-    int side_c = (rem_c * 5) / 32; 
-    int diag_c = (rem_c * 3) / 32; 
-    cw_c = 256 - (side_c * 4 + diag_c * 4); // Re-clamp center to ensure perfect normalization
+    // Blend weights (0..256 scale)
+    // emulsion 1 (STD) = visible but subtle. emulsion 2 (THICK) = heavy analog look.
+    int chroma_mix = (emulsion == 1) ? 140 : 210; 
+    int luma_mix   = (emulsion == 1) ? 20  : 40;
 
-    int rem_l = 256 - cw_l;
-    int side_l = (rem_l * 5) / 32;
-    int diag_l = (rem_l * 3) / 32;
-    cw_l = 256 - (side_l * 4 + diag_l * 4);
+    // Vertical Accumulation (72KB stack space)
+    int vsum_r[6000], vsum_g[6000], vsum_b[6000];
+    int safe_w = (width > 6000) ? 6000 : width;
 
-    for (int x = 0; x < width; x++) {
-        // Edge clamping for X-axis
-        int xl = (x > 0) ? x - 1 : 0;
-        int xr = (x < width - 1) ? x + 1 : width - 1;
+    for (int x = 0; x < safe_w; x++) {
+        int r_acc = 0, g_acc = 0, b_acc = 0;
+        for (int y = 5 - radius; y <= 5 + radius; y++) {
+            r_acc += rows[y][x*3];
+            g_acc += rows[y][x*3+1];
+            b_acc += rows[y][x*3+2];
+        }
+        vsum_r[x] = r_acc;
+        vsum_g[x] = g_acc;
+        vsum_b[x] = b_acc;
+    }
 
-        int xl3 = xl * 3; int x3 = x * 3; int xr3 = xr * 3;
+    for (int x = 0; x < safe_w; x++) {
+        int r_hsum = 0, g_hsum = 0, b_hsum = 0;
+        for (int i = -radius; i <= radius; i++) {
+            int xi = x + i;
+            if (xi < 0) xi = 0; else if (xi >= safe_w) xi = safe_w - 1;
+            r_hsum += vsum_r[xi];
+            g_hsum += vsum_g[xi];
+            b_hsum += vsum_b[xi];
+        }
 
-        int r_tl = prev_row[xl3], g_tl = prev_row[xl3+1], b_tl = prev_row[xl3+2];
-        int r_tc = prev_row[x3],  g_tc = prev_row[x3+1],  b_tc = prev_row[x3+2];
-        int r_tr = prev_row[xr3], g_tr = prev_row[xr3+1], b_tr = prev_row[xr3+2];
-        
-        int r_cl = curr_row[xl3], g_cl = curr_row[xl3+1], b_cl = curr_row[xl3+2];
-        int r_cc = curr_row[x3],  g_cc = curr_row[x3+1],  b_cc = curr_row[x3+2];
-        int r_cr = curr_row[xr3], g_cr = curr_row[xr3+1], b_cr = curr_row[xr3+2];
-        
-        int r_bl = next_row[xl3], g_bl = next_row[xl3+1], b_bl = next_row[xl3+2];
-        int r_bc = next_row[x3],  g_bc = next_row[x3+1],  b_bc = next_row[x3+2];
-        int r_br = next_row[xr3], g_br = next_row[xr3+1], b_br = next_row[xr3+2];
+        // Circular Blur Values
+        int blur_r = r_hsum / samples;
+        int blur_g = g_hsum / samples;
+        int blur_b = b_hsum / samples;
 
         if (is_yuv) {
-            // Already YUV: R=Y, G=Cb, B=Cr
-            int y  = (r_cc * cw_l + (r_tc + r_bc + r_cl + r_cr) * side_l + (r_tl + r_tr + r_bl + r_br) * diag_l) / 256;
-            int cb = (g_cc * cw_c + (g_tc + g_bc + g_cl + g_cr) * side_c + (g_tl + g_tr + g_bl + g_br) * diag_c) / 256;
-            int cr = (b_cc * cw_c + (b_tc + b_bc + b_cl + b_cr) * side_c + (b_tl + b_tr + b_bl + b_br) * diag_c) / 256;
+            // YUV Path: rows[5] is R=Y, G=Cb, B=Cr
+            int y_orig = rows[5][x*3], cb_orig = rows[5][x*3+1], cr_orig = rows[5][x*3+2];
             
-            out_row[x3]   = (uint8_t)CLAMP(y);
-            out_row[x3+1] = (uint8_t)CLAMP(cb);
-            out_row[x3+2] = (uint8_t)CLAMP(cr);
+            // Tight 3x3 Luma Blur for structural roll-off
+            int y_sum3 = 0;
+            for(int ix=-1; ix<=1; ix++) {
+                int xi = x+ix; if(xi<0) xi=0; else if(xi>=safe_w) xi=safe_w-1;
+                y_sum3 += rows[4][xi*3] + rows[5][xi*3] + rows[6][xi*3];
+            }
+            int y_blur3 = y_sum3 / 9;
+
+            out_row[x*3]   = (uint8_t)CLAMP((y_orig * (256 - luma_mix) + y_blur3 * luma_mix) / 256);
+            out_row[x*3+1] = (uint8_t)CLAMP((cb_orig * (256 - chroma_mix) + blur_g * chroma_mix) / 256);
+            out_row[x*3+2] = (uint8_t)CLAMP((cr_orig * (256 - chroma_mix) + blur_b * chroma_mix) / 256);
         } else {
-            // RGB Path: Convert 3x3 neighborhood to YCbCr on the fly to avoid
-            // blurring Luma and Chroma with the same weights.
-#define CALC_YCBCR(r, g, b, y, cb, cr) \
-    y  = (77 * r + 150 * g + 29 * b) / 256; \
-    cb = (-43 * r - 85 * g + 128 * b) / 256; \
-    cr = (128 * r - 107 * g - 21 * b) / 256
-
-            int y_tl, cb_tl, cr_tl; CALC_YCBCR(r_tl, g_tl, b_tl, y_tl, cb_tl, cr_tl);
-            int y_tc, cb_tc, cr_tc; CALC_YCBCR(r_tc, g_tc, b_tc, y_tc, cb_tc, cr_tc);
-            int y_tr, cb_tr, cr_tr; CALC_YCBCR(r_tr, g_tr, b_tr, y_tr, cb_tr, cr_tr);
-            
-            int y_cl, cb_cl, cr_cl; CALC_YCBCR(r_cl, g_cl, b_cl, y_cl, cb_cl, cr_cl);
-            int y_cc, cb_cc, cr_cc; CALC_YCBCR(r_cc, g_cc, b_cc, y_cc, cb_cc, cr_cc);
-            int y_cr, cb_cr, cr_cr; CALC_YCBCR(r_cr, g_cr, b_cr, y_cr, cb_cr, cr_cr);
-            
-            int y_bl, cb_bl, cr_bl; CALC_YCBCR(r_bl, g_bl, b_bl, y_bl, cb_bl, cr_bl);
-            int y_bc, cb_bc, cr_bc; CALC_YCBCR(r_bc, g_bc, b_bc, y_bc, cb_bc, cr_bc);
-            int y_br, cb_br, cr_br; CALC_YCBCR(r_br, g_br, b_br, y_br, cb_br, cr_br);
-#undef CALC_YCBCR
-
-            int y  = (y_cc * cw_l + (y_tc + y_bc + y_cl + y_cr) * side_l + (y_tl + y_tr + y_bl + y_br) * diag_l) / 256;
-            int cb = (cb_cc * cw_c + (cb_tc + cb_bc + cb_cl + cb_cr) * side_c + (cb_tl + cb_tr + cb_bl + cb_br) * diag_c) / 256;
-            int cr = (cr_cc * cw_c + (cr_tc + cr_bc + cr_cl + cr_cr) * side_c + (cr_tl + cr_tr + cr_bl + cr_br) * diag_c) / 256;
-
-            // DELTA RECONSTRUCTION to avoid rounding errors and systematic green casts
-            int dy  = y  - y_cc;
-            int dcb = cb - cb_cc;
-            int dcr = cr - cr_cc;
-
-            out_row[x3]   = (uint8_t)CLAMP(r_cc + dy + ((359 * dcr) / 256));
-            out_row[x3+1] = (uint8_t)CLAMP(g_cc + dy - ((88 * dcb) / 256) - ((183 * dcr) / 256));
-            out_row[x3+2] = (uint8_t)CLAMP(b_cc + dy + ((453 * dcb) / 256));
+            // RGB Path: Direct channel blending
+            int r_o = rows[5][x*3], g_o = rows[5][x*3+1], b_o = rows[5][x*3+2];
+            out_row[x*3]   = (uint8_t)CLAMP((r_o * (256 - chroma_mix) + blur_r * chroma_mix) / 256);
+            out_row[x*3+1] = (uint8_t)CLAMP((g_o * (256 - chroma_mix) + blur_g * chroma_mix) / 256);
+            out_row[x*3+2] = (uint8_t)CLAMP((b_o * (256 - chroma_mix) + blur_b * chroma_mix) / 256);
         }
     }
 }

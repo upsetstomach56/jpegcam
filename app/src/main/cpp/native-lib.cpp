@@ -259,12 +259,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long vig_coef    = get_vig_coef(vignette, max_dist_sq);
     int opac_mapped   = (opacity * 256) / 100;
 
-    // --- MEMORY-SAFE 3-ROW ROLLING BUFFER (~72KB overhead) ---
-    // We allocate 4 row buffers: prev, curr, next (original data) and out (processed data)
-    unsigned char* buf_prev = (unsigned char*)malloc(row_stride);
-    unsigned char* buf_curr = (unsigned char*)malloc(row_stride);
-    unsigned char* buf_next = (unsigned char*)malloc(row_stride);
-    unsigned char* buf_out  = (unsigned char*)malloc(row_stride);
+    // --- MEMORY-SAFE 11-ROW SYMMETRIC BUFFER (~216KB overhead) ---
+    // 11 source rows (rows[0]..rows[10]) and 1 output row (rows[11])
+    unsigned char* rows[12];
+    for (int i = 0; i < 12; i++) rows[i] = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
 
     int map[256];
@@ -283,17 +281,24 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     uint32_t seed = (uint32_t)(start_time & 0xFFFFFFFF);
     if (seed == 0) seed = 98765;
 
-    // --- PRE-LOAD BUFFER ---
+    // --- PRE-LOAD BUFFER (Initialize the 11-row window) ---
+    // We want rows[5] to be the "current" row being processed.
     if (cinfo_d.output_height > 0) {
-        row_pointer[0] = buf_curr;
+        row_pointer[0] = rows[5]; 
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-        memcpy(buf_prev, buf_curr, row_stride); // Edge Clamp: duplicate first row
+        // Mirror row 0 upwards to handle top edge
+        for (int i = 0; i < 5; i++) memcpy(rows[i], rows[5], row_stride);
     }
-    if (cinfo_d.output_height > 1) {
-        row_pointer[0] = buf_next;
-        jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-    } else {
-        memcpy(buf_next, buf_curr, row_stride); // Edge Clamp: duplicate if 1px high
+    
+    // Read ahead rows (6 through 10)
+    for (int i = 6; i <= 10; i++) {
+        if (cinfo_d.output_scanline < cinfo_d.output_height) {
+            row_pointer[0] = rows[i];
+            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+        } else {
+            // Mirror the last available row if image is very short
+            memcpy(rows[i], rows[i-1], row_stride);
+        }
     }
 
     // --- MAIN PROCESSING LOOP ---
@@ -301,12 +306,13 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     while (processed_rows < cinfo_d.output_height) {
         int abs_y = processed_rows;
         
-        // Copy original curr data into out buffer to safely modify it
-        memcpy(buf_out, buf_curr, row_stride);
+        // rows[5] is the current target row.
+        // Copy original curr data into out buffer (rows[11]) to safely modify it
+        memcpy(rows[11], rows[5], row_stride);
 
-        // Emulsion pre-pass: applies true 2D dye-cloud softening
+        // Emulsion v2: applies true 2D 11x11 circular dye-cloud softening
         if (emulsion > 0) {
-            apply_emulsion(buf_prev, buf_curr, buf_next, buf_out, cinfo_d.output_width, !use_rgb_path, emulsion);
+            apply_emulsion_v2(rows, rows[11], cinfo_d.output_width, !use_rgb_path, emulsion);
         }
 
         if (use_rgb_path) {
@@ -314,7 +320,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // PATH A: RGB + LUT + ANALOG PHYSICS
             // ==========================================
             process_row_rgb(
-                buf_out, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                rows[11], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                 grain, grainSize, seed,
                 opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
@@ -324,34 +330,34 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // PATH B: YUV EXPRESSWAY
             // ==========================================
             process_row_yuv(
-                buf_out, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                rows[11], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                 grain, grainSize, seed,
                 rolloff_lut
             );
         }
 
-        row_pointer[0] = buf_out;
+        row_pointer[0] = rows[11];
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
 
-        // Roll the buffers
-        unsigned char* temp = buf_prev;
-        buf_prev = buf_curr;
-        buf_curr = buf_next;
-        buf_next = temp; // Re-use the old prev buffer for the new row
+        // Slide the window: move rows up
+        unsigned char* oldest = rows[0];
+        for (int i = 0; i < 10; i++) rows[i] = rows[i+1];
+        rows[10] = oldest; // Re-use the buffer that just fell off the top
 
+        // Read the next scanline into the bottom of the window
         if (cinfo_d.output_scanline < cinfo_d.output_height) {
-            row_pointer[0] = buf_next;
+            row_pointer[0] = rows[10];
             jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
         } else {
-            // Edge Clamp: duplicate last row
-            memcpy(buf_next, buf_curr, row_stride);
+            // Edge Clamp: duplicate last row downwards
+            memcpy(rows[10], rows[9], row_stride);
         }
         
         processed_rows++;
     }
 
-    free(buf_prev); free(buf_curr); free(buf_next); free(buf_out);
+    for (int i = 0; i < 12; i++) free(rows[i]);
     jpeg_finish_compress(&cinfo_c);  jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
     fclose(infile); fclose(outfile);
