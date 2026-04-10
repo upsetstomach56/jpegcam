@@ -138,7 +138,7 @@ public class RecipeManager {
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
             p.grainSize       = json.optInt("grainSize", 0);
-            p.emulsion        = json.optInt("emulsion", 0);
+            p.bloom           = json.optInt("bloom", 0);
             p.contrast        = json.optInt("contrast", 0);
             p.saturation      = json.optInt("saturation", 0);
             p.wbShift         = json.optInt("wbShift", 0);
@@ -186,7 +186,7 @@ public class RecipeManager {
             sb.append("  \"vignette\": ").append(p.vignette).append(",\n");
             sb.append("  \"grain\": ").append(p.grain).append(",\n");
             sb.append("  \"grainSize\": ").append(p.grainSize).append(",\n");
-            sb.append("  \"emulsion\": ").append(p.emulsion).append(",\n");
+            sb.append("  \"bloom\": ").append(p.bloom).append(",\n");
             sb.append("  \"contrast\": ").append(p.contrast).append(",\n");
             sb.append("  \"saturation\": ").append(p.saturation).append(",\n");
             sb.append("  \"wbShift\": ").append(p.wbShift).append(",\n");

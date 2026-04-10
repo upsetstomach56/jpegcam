@@ -13,7 +13,7 @@ public class LutEngine {
         String inPath, String outPath, int scaleDenom, int opacity,
         int grain, int grainSize, int vignette, int rollOff,
         int colorChrome, int chromeBlue, int shadowToe,
-        int subtractiveSat, int halation, int emulsion, int jpegQuality
+        int subtractiveSat, int halation, int bloom, int jpegQuality
     );
 
     /**
@@ -31,9 +31,9 @@ public class LutEngine {
     public boolean applyLutToJpeg(String in, String out, int scale, int opacity,
                                   int grain, int grainSize, int vignette, int rollOff,
                                   int colorChrome, int chromeBlue, int shadowToe,
-                                  int subtractiveSat, int halation, int emulsion, int quality) {
+                                  int subtractiveSat, int halation, int bloom, int quality) {
         return processImageNative(in, out, scale, opacity, grain, grainSize, vignette,
                                  rollOff, colorChrome, chromeBlue, shadowToe,
-                                 subtractiveSat, halation, emulsion, quality);
+                                 subtractiveSat, halation, bloom, quality);
     }
 }

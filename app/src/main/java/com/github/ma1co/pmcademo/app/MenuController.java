@@ -456,8 +456,8 @@ public class MenuController {
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
             
-            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Emulsion Simulation (0, 1, or 2)
-            else if (sel == 6) p.emulsion = Math.max(0, Math.min(2, p.emulsion + dir));
+            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom (0, 1, or 2)
+            else if (sel == 6) p.bloom = Math.max(0, Math.min(2, p.bloom + dir));
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
@@ -585,7 +585,7 @@ public class MenuController {
                 setRow(5, "Halation (Red Glow)",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
                 
                 // NEW ROW ADDED HERE
-                setRow(6, "Emulsion Sim",           p.emulsion==0?"OFF":(p.emulsion==1?"STD":"THICK"));
+                setRow(6, "Soft Bloom",             p.bloom==0?"OFF":(p.bloom==1?"STD":"RICH"));
             }
         }
         if (currentPage == 6) {

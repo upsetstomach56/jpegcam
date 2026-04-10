@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <android/log.h>
+#include <math.h>
 
 #define CLAMP(x) ((x) < 0 ? 0 : ((x) > 255 ? 255 : (x)))
 #define LOG_TAG "COOKBOOK_NATIVE"
@@ -19,7 +20,7 @@
 // vignette, 0, 5
 // grain, 0, 5
 // grainSize, 0, 2
-// emulsion, 0, 2
+// bloom, 0, 2
 // === END_METADATA ===
 
 // --- SHARED HELPERS ---
@@ -37,78 +38,109 @@ inline void generate_rolloff_lut(uint8_t* lut, int rollOff) {
 }
 
 inline uint32_t fast_rand(uint32_t* state) {
-    // Xorshift for high-frequency "salt" noise
     uint32_t x = *state; x ^= x << 13; x ^= x >> 17; x ^= x << 5; *state = x; return x;
 }
 
 // ==========================================
-// TRUE 2D BLUR EXAMPLE (Memory-Safe 21-Row)
+// OPTICAL BLOOM & TRUE HALATION ENGINE
 //
-// This is a reference implementation showing how to perform a massive
-// 2D Box Blur on a 24MP image using a rolling symmetric buffer
-// without causing Out-of-Memory (OOM) crashes.
-//
-// STD (1): 50% Blur Mix
-// THICK (2): 100% Blur Mix (Maximum Softness)
+// 1. True Halation: 2D Red/Orange bloom from bright specular highlights.
+// 2. Chromatic Soft Glow: Color-reactive bloom (e.g. Yellow boxes glow Yellow).
 // ==========================================
-inline void apply_emulsion_v2(
-    unsigned char** rows, uint8_t* out_row, int width, bool is_yuv, int emulsion)
+inline void apply_bloom_halation(
+    unsigned char** rows, uint8_t* out_row, int width, int abs_y, bool is_yuv, int bloom, int halation, uint32_t seed)
 {
-    if (emulsion == 0 || width < 1) return;
-
-    // Fixed radius for the example
+    // RADIUS: 10 pixels for wide feathering
     const int radius = 10;
     const int diameter = 21;
     const int samples = diameter * diameter;
 
-    // VISIBLE MIX: Level 1 = 50%, Level 2 = 100%
-    int mix = (emulsion == 1) ? 128 : 255;
+    // Blend weights
+    int bloom_mix = (bloom == 1) ? 80 : 160; 
+    int hal_mix   = (halation == 1) ? 120 : 220;
 
-    // HEAP ALLOCATION
+    // HEAP ALLOCATION for sliding window summation
     int* vsum_r = (int*)malloc(width * sizeof(int));
     int* vsum_g = (int*)malloc(width * sizeof(int));
     int* vsum_b = (int*)malloc(width * sizeof(int));
+    int* vsum_h = (int*)malloc(width * sizeof(int)); // Halation source map
 
-    if (!vsum_r || !vsum_g || !vsum_b) {
-        if (vsum_r) free(vsum_r); if (vsum_g) free(vsum_g); if (vsum_b) free(vsum_b);
+    if (!vsum_r || !vsum_g || !vsum_b || !vsum_h) {
+        if (vsum_r) free(vsum_r); if (vsum_g) free(vsum_g); if (vsum_b) free(vsum_b); if (vsum_h) free(vsum_h);
         return;
     }
 
-    // Vertical Summation (Pass 1)
+    // Pass 1: Vertical Summation
     for (int x = 0; x < width; x++) {
-        int r_acc = 0, g_acc = 0, b_acc = 0;
+        int r_acc = 0, g_acc = 0, b_acc = 0, h_acc = 0;
         for (int y = 0; y <= 20; y++) {
-            r_acc += (int)rows[y][x*3];
-            g_acc += (int)rows[y][x*3+1];
-            b_acc += (int)rows[y][x*3+2];
+            int r = rows[y][x*3], g = rows[y][x*3+1], b = rows[y][x*3+2];
+            r_acc += r; g_acc += g; b_acc += b;
+            
+            // Halation Source: Identify very bright pixels (specular highlights)
+            int lum = is_yuv ? r : (r*77 + g*150 + b*29)/256;
+            if (lum > 240) h_acc += (lum - 240);
         }
-        vsum_r[x] = r_acc; vsum_g[x] = g_acc; vsum_b[x] = b_acc;
+        vsum_r[x] = r_acc; vsum_g[x] = g_acc; vsum_b[x] = b_acc; vsum_h[x] = h_acc;
     }
 
-    // Horizontal Summation (Pass 2) + Output
+    // Pass 2: Horizontal Summation + Reconstruction
     for (int x = 0; x < width; x++) {
-        int r_hsum = 0, g_hsum = 0, b_hsum = 0;
+        int r_hsum = 0, g_hsum = 0, b_hsum = 0, h_hsum = 0;
         for (int i = -radius; i <= radius; i++) {
             int xi = x + i;
             if (xi < 0) xi = 0; else if (xi >= width) xi = width - 1;
-            r_hsum += vsum_r[xi];
-            g_hsum += vsum_g[xi];
-            b_hsum += vsum_b[xi];
+            r_hsum += vsum_r[xi]; g_hsum += vsum_g[xi]; b_hsum += vsum_b[xi]; h_hsum += vsum_h[xi];
         }
 
-        int blur_r = r_hsum / samples;
-        int blur_g = g_hsum / samples;
-        int blur_b = b_hsum / samples;
+        // Diffused Light (The Dye Cloud)
+        int diff_r = r_hsum / samples;
+        int diff_g = g_hsum / samples;
+        int diff_b = b_hsum / samples;
+        int diff_h = h_hsum / samples; // The red halation bleed
 
         int r_o = rows[10][x*3], g_o = rows[10][x*3+1], b_o = rows[10][x*3+2];
 
-        // Apply visible mix
-        out_row[x*3]   = (uint8_t)CLAMP((r_o * (255 - mix) + blur_r * mix) / 255);
-        out_row[x*3+1] = (uint8_t)CLAMP((g_o * (255 - mix) + blur_g * mix) / 255);
-        out_row[x*3+2] = (uint8_t)CLAMP((b_o * (255 - mix) + blur_b * mix) / 255);
+        if (is_yuv) {
+            // YUV Path: R=Y, G=Cb, B=Cr
+            // Soft Glow (Bloom): Color bleeds, Luma stays relatively sharp
+            if (bloom > 0) {
+                int cb_b = (g_o * (256 - bloom_mix) + diff_g * bloom_mix) / 256;
+                int cr_b = (b_o * (256 - bloom_mix) + diff_b * bloom_mix) / 256;
+                // Add a microscopic luma bloom for the "creaminess"
+                int y_b = (r_o * 240 + diff_r * 16) / 256;
+                out_row[x*3] = (uint8_t)CLAMP(y_b); out_row[x*3+1] = (uint8_t)CLAMP(cb_b); out_row[x*3+2] = (uint8_t)CLAMP(cr_b);
+            } else {
+                out_row[x*3] = r_o; out_row[x*3+1] = g_o; out_row[x*3+2] = b_o;
+            }
+
+            // True Halation (Red/Warm Glow around highlights)
+            if (halation > 0 && diff_h > 0) {
+                int hl = (diff_h * hal_mix) / 256;
+                out_row[x*3]   = (uint8_t)CLAMP(out_row[x*3] + hl / 4); // Brighten slightly
+                out_row[x*3+2] = (uint8_t)CLAMP(out_row[x*3+2] + hl);   // Boost Cr (Red)
+                out_row[x*3+1] = (uint8_t)CLAMP(out_row[x*3+1] - hl/4); // Roll off Cb (Blue)
+            }
+        } else {
+            // RGB Path
+            if (bloom > 0) {
+                out_row[x*3]   = (uint8_t)CLAMP((r_o * (256 - bloom_mix) + diff_r * bloom_mix) / 256);
+                out_row[x*3+1] = (uint8_t)CLAMP((g_o * (256 - bloom_mix) + diff_g * bloom_mix) / 256);
+                out_row[x*3+2] = (uint8_t)CLAMP((b_o * (256 - bloom_mix) + diff_b * bloom_mix) / 256);
+            } else {
+                out_row[x*3] = r_o; out_row[x*3+1] = g_o; out_row[x*3+2] = b_o;
+            }
+
+            if (halation > 0 && diff_h > 0) {
+                int hl = (diff_h * hal_mix) / 256;
+                out_row[x*3]   = (uint8_t)CLAMP(out_row[x*3] + hl);     // Red lift
+                out_row[x*3+1] = (uint8_t)CLAMP(out_row[x*3+1] - hl/8); // Green dip
+                out_row[x*3+2] = (uint8_t)CLAMP(out_row[x*3+2] - hl/4); // Blue roll-off
+            }
+        }
     }
 
-    free(vsum_r); free(vsum_g); free(vsum_b);
+    free(vsum_r); free(vsum_g); free(vsum_b); free(vsum_h);
 }
 
 // ==========================================
@@ -138,7 +170,7 @@ inline void process_row_rgb(
         int i = x * 3;
         int r = row[i], g = row[i+1], b = row[i+2];
 
-        // --- LUT CALCS (Tetrahedral Trilinear Interpolation) ---
+        // --- LUT CALCS ---
         int fX = map[r], fY = map[g], fZ = map[b];
         int x0 = fX / 128, y0 = fY / 128, z0 = fZ / 128;
         int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -206,52 +238,30 @@ inline void process_row_rgb(
             outR = (outR * r256) / 256; outG = (outG * r256) / 256; outB = (outB * r256) / 256;
         }
 
-        // --- FILM HALATION ---
-        // Extended range: starts at 220 (was 245) for a gradual, realistic
-        // warm red bloom that creeps in from specular highlights downward.
-        // The lower threshold means halation is visible on bright windows,
-        // chrome, and skin highlights — not just blown-out clipping.
-        if (halation > 0 && targetY > 220) {
-            int hl = (targetY - 220) * (halation == 1 ? 3 : 7);
-            outR += hl / 2;    // warm red lift
-            outG -= hl / 32;   // imperceptible green drop
-            outB -= hl / 8;    // blue rolls off (shifts toward warm)
-        }
+        // --- FILM HALATION (Removed legacy per-pixel logic) ---
 
         if (vignette > 0) {
-            int v_m = 256 - (int)((d_sq * vig_coef) / 16777216); // 2^24
+            int v_m = 256 - (int)((d_sq * vig_coef) / 16777216);
             if (v_m < 0) v_m = 0;
             outR = (outR * v_m) / 256; outG = (outG * v_m) / 256; outB = (outB * v_m) / 256;
         }
 
-        // --- GRAIN (TRUE ORGANIC FBM LUMINANCE GRAIN) ---
+        // --- GRAIN ---
         if (s_grain > 0) {
-            // Salt (sharp high-frequency noise)
             uint32_t salt_raw = fast_rand(&seed);
             int salt = (int)(salt_raw & 0xFF) - 128;
             int noise = salt;
-
             if (grainSize > 0) {
-                // Clump (low-frequency organic grouping via spatial hash)
-                uint32_t bx = (grainSize == 1) ? (x / 2) : ((x * 21845) / 65536); // >> 16
+                uint32_t bx = (grainSize == 1) ? (x / 2) : ((x * 21845) / 65536);
                 uint32_t by = (grainSize == 1) ? (abs_y / 2) : ((abs_y * 21845) / 65536);
                 uint32_t h = (bx * 1274126177U) ^ (by * 2654435761U) ^ seed;
                 h = (h ^ (h / 8192)) * 374761393U;
                 int clump = (int)(h & 0xFF) - 128;
-                // Mixing: 40% sharp salt, 60% soft clump
                 noise = (salt * 100 + clump * 150) / 256;
             }
-
             int mask = (targetY < 128) ? targetY : 255 - targetY;
             if (targetY < 64) mask = (mask * targetY) / 64;
-
-            // Organic Density Bias:
-            // Shift noise additive in shadows and subtractive in highlights
-            int bias = (128 - targetY) / 2;
-            int biased_noise = noise + bias;
-
-            int gv = (biased_noise * mask * s_grain) / 32768;
-
+            int gv = (noise * mask * s_grain) / 32768;
             outR += gv; outG += gv; outB += gv;
         }
 
@@ -270,10 +280,8 @@ inline void process_row_yuv(
     int grain, int grainSize, uint32_t& seed,
     const uint8_t* rolloff_lut)
 {
-    int s_chrome = colorChrome * 40;
-    int s_blue   = chromeBlue * 40;
-    int s_sat    = subtractiveSat * 40;
-    int s_grain  = grain * 20;
+    int s_roll = rollOff * 20;
+    int s_grain = grain * 20;
     if (grainSize == 1) s_grain = (s_grain * 3) / 2;
     if (grainSize == 2) s_grain = (s_grain * 5) / 4;
 
@@ -283,8 +291,7 @@ inline void process_row_yuv(
 
     for (int x = 0; x < width; x++) {
         int i = x * 3;
-        int oldY = row[i];
-        int outY = oldY;
+        int oldY = row[i], outY = oldY;
 
         if (shadowToe > 0) {
             int lift = (shadowToe == 1) ? 35 : 55;
@@ -292,55 +299,25 @@ inline void process_row_yuv(
         }
         if (rollOff > 0) outY = rolloff_lut[outY];
         if (vignette > 0) {
-            int v_m = 256 - (int)((d_sq * vig_coef) / 16777216); // 2^24
+            int v_m = 256 - (int)((d_sq * vig_coef) / 16777216);
             if (v_m < 0) v_m = 0;
             outY = (outY * v_m) / 256;
         }
 
         int cb = row[i+1] - 128, cr = row[i+2] - 128;
-        int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
-
-        if (s_chrome > 0 && sat > 15) {
-            int drop = ((sat - 15) * s_chrome) / 256;
-            if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) / 256; }
-            if (drop > (outY / 4)) drop = outY / 4;
-            outY -= drop;
-        }
-        if (s_blue > 0 && cb > 5 && cr < 25) {
-            int drop = (cb * s_blue) / 128;
-            if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) / 256; }
-            if (outY < 50) { int fade = (outY * 5); if (fade > 255) fade = 255; drop = (drop * fade) / 256; }
-            if (drop > (outY / 4)) drop = outY / 4;
-            outY -= drop; cr -= (drop / 2);
-        }
-        if (s_sat > 0 && sat > 20) {
-            int density = ((sat - 20) * s_sat) / 256;
-            if (outY > 200) { int fade = 255 - ((outY - 200) * 4); if (fade < 0) fade = 0; density = (density * fade) / 256; }
-            if (density > (outY / 4)) density = outY / 4;
-            outY -= density;
-        }
-
-        if (outY < 8) outY = 8;
-
-        // --- FILM HALATION (YUV path) ---
-        // Extended range: starts at 220 (was 245), gradual warm chroma bloom.
-        if (halation > 0 && outY > 220) {
-            int push = (outY - 220) * (halation == 1 ? 2 : 5);
-            cr += push / 2;    // shift chroma toward warm/red
-            cb -= push / 8;    // slight blue rolloff in hot highlights
-        }
+        
+        // --- FILM HALATION (Removed legacy per-pixel logic) ---
 
         if (oldY != outY) {
             int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
             cb = (cb * r256) / 256; cr = (cr * r256) / 256;
         }
 
-        // --- GRAIN (TRUE ORGANIC FBM LUMINANCE GRAIN) ---
+        // --- GRAIN ---
         if (s_grain > 0) {
             uint32_t salt_raw = fast_rand(&seed);
             int salt = (int)(salt_raw & 0xFF) - 128;
             int noise = salt;
-
             if (grainSize > 0) {
                 uint32_t bx = (grainSize == 1) ? (x / 2) : ((x * 21845) / 65536);
                 uint32_t by = (grainSize == 1) ? (abs_y / 2) : ((abs_y * 21845) / 65536);
@@ -349,16 +326,9 @@ inline void process_row_yuv(
                 int clump = (int)(h & 0xFF) - 128;
                 noise = (salt * 100 + clump * 150) / 256;
             }
-
             int mask = (outY < 128) ? outY : 255 - outY;
             if (outY < 64) mask = (mask * outY) / 64;
-
-            // Organic Density Bias:
-            // Shift noise additive in shadows and subtractive in highlights
-            int bias = (128 - outY) / 2;
-            int biased_noise = noise + bias;
-
-            outY += (biased_noise * mask * s_grain) / 32768;
+            outY += (noise * mask * s_grain) / 32768;
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);

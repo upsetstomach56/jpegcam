@@ -309,7 +309,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                        (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
                         p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
                         p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
-                        p.emulsion != 0);
+                        p.bloom != 0);
             }
             @Override 
             public void onNewPhotoDetected(final String path) { 

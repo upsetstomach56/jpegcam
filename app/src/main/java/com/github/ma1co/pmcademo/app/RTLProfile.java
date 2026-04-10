@@ -52,10 +52,10 @@ public class RTLProfile {
     public int subtractiveSat = 0;
     public int halation = 0;
 
-    // --- Emulsion Simulation ---
-    // Simulates the physical overlap of film dye clouds using a 2D 3x3 micro-blur.
-    // 0 = OFF | 1 = STANDARD | 2 = THICK
-    public int emulsion = 0;
+    // --- Optical Bloom & Soft Glow ---
+    // Simulates the physical scattering of light through film layers.
+    // 0 = OFF | 1 = STANDARD | 2 = RICH
+    public int bloom = 0;
 
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);

@@ -148,7 +148,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
     jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
     jint shadowToe, jint subtractiveSat, jint halation,
-    jint emulsion, jint jpegQuality) {
+    jint bloom, jint jpegQuality) {
 
     long long start_time = get_time_ms();
 
@@ -310,10 +310,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         // Copy original curr data into out buffer (rows[21]) to safely modify it
         memcpy(rows[21], rows[10], row_stride);
 
-        // Emulsion v2: applies true 2D circular dye-cloud softening
-        if (emulsion > 0) {
-            LOGD("NATIVE: Applying Emulsion Sim Level %d (Width: %d)", emulsion, cinfo_d.output_width);
-            apply_emulsion_v2(rows, rows[21], cinfo_d.output_width, !use_rgb_path, emulsion);
+        // Optical Bloom & Halation pre-pass
+        if (bloom > 0 || halation > 0) {
+            apply_bloom_halation(rows, rows[21], cinfo_d.output_width, abs_y, !use_rgb_path, bloom, halation, seed);
         }
 
         if (use_rgb_path) {
@@ -322,7 +321,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // ==========================================
             process_row_rgb(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, seed,
                 opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
             );
@@ -332,7 +331,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             // ==========================================
             process_row_yuv(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, seed,
                 rolloff_lut
             );
