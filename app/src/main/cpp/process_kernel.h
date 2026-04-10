@@ -48,10 +48,13 @@ inline uint32_t fast_rand(uint32_t* state) {
 // ==========================================
 inline void apply_bloom_halation(
     unsigned char** rows, uint8_t* out_row, int width, int abs_y, bool is_yuv, int bloom, int halation, uint32_t seed,
-    int* work_0, int* work_1, int* work_2, int* work_h, int* h_line)
+    int* work_0, int* work_1, int* work_2, int* work_h, int* h_line, int scaleDenom)
 {
-    // BLOOM RADIUS (IIR Alpha)
-    int alpha = (bloom == 1) ? 245 : 252;
+    // BLOOM RADIUS (IIR Alpha) - Resolution Aware Scaling
+    // Mathematically shrinks the blur spread for PROXY/HALF to match FULL visual radius
+    int alpha;
+    if (bloom == 1) alpha = (scaleDenom == 4) ? 214 : ((scaleDenom == 2) ? 232 : 245);
+    else            alpha = (scaleDenom == 4) ? 240 : ((scaleDenom == 2) ? 246 : 252);
     int inv_alpha = 256 - alpha;
 
     if (!work_0 || !work_1 || !work_2 || !work_h) {
@@ -78,7 +81,7 @@ inline void apply_bloom_halation(
         work_0[x] = (int)(s0 / 121); 
         work_1[x] = (int)(s1 / 121); 
         work_2[x] = (int)(s2 / 121);
-        work_h[x] = (int)sh; // Fix: Keep full precision (0-3630) to prevent IIR degradation
+        work_h[x] = (int)sh; // Keep full precision (0-3630) to prevent IIR degradation
     }
 
     // 2. Horizontal IIR Bloom
@@ -104,8 +107,11 @@ inline void apply_bloom_halation(
 
     // 3. Horizontal Halation
     if (halation > 0) {
-        int h_alpha = (halation == 1) ? 220 : 240;
+        int h_alpha;
+        if (halation == 1) h_alpha = (scaleDenom == 4) ? 140 : ((scaleDenom == 2) ? 180 : 220);
+        else               h_alpha = (scaleDenom == 4) ? 197 : ((scaleDenom == 2) ? 221 : 240);
         int inv_h = 256 - h_alpha;
+        
         // Forward
         int ah = work_h[0];
         for (int x = 1; x < width; x++) {
@@ -198,7 +204,7 @@ inline void process_row_rgb(
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, uint32_t& seed,
     int opac_mapped, const int* map,
-    const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2)
+    const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2, int scaleDenom)
 {
     int s_roll   = rollOff * 20;
     int s_chrome = colorChrome * 40;
@@ -207,6 +213,9 @@ inline void process_row_rgb(
     int s_grain  = grain * 20;
     if (grainSize == 1) s_grain = (s_grain * 3) / 2;
     if (grainSize == 2) s_grain = (s_grain * 5) / 4;
+    
+    // Fix: Prevent chunky static on PROXY/HALF EVF previews
+    if (scaleDenom > 1) s_grain /= scaleDenom;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -322,12 +331,15 @@ inline void process_row_yuv(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, uint32_t& seed,
-    const uint8_t* rolloff_lut)
+    const uint8_t* rolloff_lut, int scaleDenom)
 {
     int s_roll = rollOff * 20;
     int s_grain = grain * 20;
     if (grainSize == 1) s_grain = (s_grain * 3) / 2;
     if (grainSize == 2) s_grain = (s_grain * 5) / 4;
+
+    // Fix: Prevent chunky static on PROXY/HALF EVF previews
+    if (scaleDenom > 1) s_grain /= scaleDenom;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
