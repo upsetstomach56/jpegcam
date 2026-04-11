@@ -148,7 +148,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
     jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
     jint shadowToe, jint subtractiveSat, jint halation,
-    jint bloom, jint jpegQuality) {
+    jint bloom, jint advancedGrainExperimental, jint jpegQuality) {
 
     long long start_time = get_time_ms();
 
@@ -337,8 +337,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             process_row_rgb(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                grain, grainSize, seed,
-                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2, scaleDenom
+                grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
             );
         } else {
             // ==========================================
@@ -347,8 +347,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             process_row_yuv(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                grain, grainSize, seed,
-                rolloff_lut, scaleDenom
+                grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                rolloff_lut
             );
         }
 

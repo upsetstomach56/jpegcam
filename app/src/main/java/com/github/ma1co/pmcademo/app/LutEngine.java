@@ -13,7 +13,7 @@ public class LutEngine {
         String inPath, String outPath, int scaleDenom, int opacity,
         int grain, int grainSize, int vignette, int rollOff,
         int colorChrome, int chromeBlue, int shadowToe,
-        int subtractiveSat, int halation, int bloom, int jpegQuality
+        int subtractiveSat, int halation, int bloom, int advancedGrainExperimental, int jpegQuality
     );
 
     /**
