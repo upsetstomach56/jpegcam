@@ -205,10 +205,9 @@ public class PlaybackController {
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
             
-            // --- FIX: TRUE COLOR & DITHERING ---
-            // Upgrading from RGB_565 to ARGB_8888 to unlock full 8-bit gradients,
-            // and enabling dithering to smooth out the downsampling process.
-            opts.inPreferredConfig  = Bitmap.Config.ARGB_8888; 
+            // REVERTED to 16-bit color. ARGB_8888 is too heavy for the BIONZ heap.
+            // Dithering is kept ON to smooth out the resulting color bands.
+            opts.inPreferredConfig  = Bitmap.Config.RGB_565; 
             opts.inDither           = true; 
             
             opts.inPurgeable        = true;

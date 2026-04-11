@@ -246,11 +246,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.image_height     = cinfo_d.output_height;
     cinfo_c.input_components = 3;
     cinfo_c.in_color_space   = use_rgb_path ? JCS_RGB : JCS_YCbCr;
-    jpeg_set_defaults(&cinfo_c);
+    jjpeg_set_defaults(&cinfo_c);
     jpeg_set_quality(&cinfo_c, jpegQuality, TRUE);
     
-    // FIX: Disable default JFIF so our EXIF marker is strictly first, preventing Sony DECODE ERRORs
-    cinfo_c.write_JFIF_header = FALSE; 
+    // DELTED: cinfo_c.write_JFIF_header = FALSE;
     
     jpeg_start_compress(&cinfo_c, TRUE);
 
