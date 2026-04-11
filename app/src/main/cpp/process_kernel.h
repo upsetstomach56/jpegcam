@@ -96,7 +96,7 @@ struct BakedGrainAtlas {
     std::vector<int8_t> brightOpen;
     std::vector<int8_t> highDense;
 
-    BakedGrainAtlas() : size(128), mask(127), ready(false) {}
+    BakedGrainAtlas() : size(256), mask(255), ready(false) {}
 };
 
 inline void blur_field(std::vector<float>& field, int size, int passes) {
@@ -277,7 +277,7 @@ inline void build_carrier_template(std::vector<int8_t>& out, int size, const std
 inline BakedGrainAtlas& baked_grain_atlas() {
     static BakedGrainAtlas t;
     if (!t.ready) {
-        const int size = 128;
+        const int size = 256;
         t.size = size;
         t.mask = size - 1;
         generate_correlated_template(t.fine, size, 0x91E10DA5u, 1, 2, 6, 0.30f, 0.22f, 64);
@@ -369,8 +369,15 @@ inline const std::vector<int8_t>& atlas_profile_for_index(const BakedGrainAtlas&
 inline int grain_profile_sample(int x, int y, int profileIndex, int flatness, int amp, uint32_t seed) {
     if (amp <= 0) return 0;
     const BakedGrainAtlas& atlas = baked_grain_atlas();
-    int phase0x = int(seed & (uint32_t)atlas.mask);
-    int phase0y = int((seed >> 8) & (uint32_t)atlas.mask);
+    
+    // --- DOMAIN WARPING (ANTI-TILE) ---
+    // Organically distorts the grid coordinates using the coarse noise
+    // itself, breaking up any visible repeating patterns without seams.
+    int warp = sample_atlas_template(atlas.coarse, atlas.mask, y >> 1, x >> 1) >> 3;
+
+    int phase0x = int(seed & (uint32_t)atlas.mask) + warp;
+    int phase0y = int((seed >> 8) & (uint32_t)atlas.mask) - warp;
+
     int sample = sample_atlas_template(atlas_profile_for_index(atlas, profileIndex), atlas.mask, x + phase0x, y + phase0y);
     int gate = 126 + ((flatness * 3) >> 3);
     return (sample * gate * amp + (1 << 15)) >> 16;
@@ -378,6 +385,12 @@ inline int grain_profile_sample(int x, int y, int profileIndex, int flatness, in
 
 inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int abs_y, int s_grain, int grainSize, int scaleDenom, uint32_t seed) {
     if (s_grain <= 0) return centerY;
+
+    // --- RESOLUTION SCALING FIX ---
+    // Locks the physical size of the grain clumps to the full sensor resolution,
+    // preventing grain from appearing massive in Live-View (Proxy) or Half-Res.
+    int sx = x * scaleDenom;
+    int sy = abs_y * scaleDenom;
 
     int blurY = (leftY + (centerY << 1) + rightY + 2) >> 2;
     int edge = leftY > rightY ? leftY - rightY : rightY - leftY;
@@ -414,10 +427,10 @@ inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int a
 
     const BakedGrainAtlas& atlas = baked_grain_atlas();
     int profileIndex = (scaleDenom == 1)
-        ? select_profile_full_res(densityY, x, abs_y, seed, atlas)
+        ? select_profile_full_res(densityY, sx, sy, seed, atlas)
         : grain_profile_index(densityY);
 
-    int grainTerm = grain_profile_sample(x, abs_y, profileIndex, flat, amp, seed);
+    int grainTerm = grain_profile_sample(sx, sy, profileIndex, flat, amp, seed);
 
     // --- ANALOG SHOULDER (EMULSION LIMITER) ---
     // Protects the original Portra model from hard-clipping when the 
