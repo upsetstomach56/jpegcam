@@ -246,7 +246,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.image_height     = cinfo_d.output_height;
     cinfo_c.input_components = 3;
     cinfo_c.in_color_space   = use_rgb_path ? JCS_RGB : JCS_YCbCr;
-    jjpeg_set_defaults(&cinfo_c);
+    jpeg_set_defaults(&cinfo_c);
     jpeg_set_quality(&cinfo_c, jpegQuality, TRUE);
     
     // DELTED: cinfo_c.write_JFIF_header = FALSE;
