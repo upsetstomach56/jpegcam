@@ -1,36 +1,29 @@
 package com.github.ma1co.pmcademo.app;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.net.NetworkInfo;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Handler;
 
-import com.sony.wifi.direct.DirectConfiguration;
-import com.sony.wifi.direct.DirectManager;
-
-import java.lang.reflect.Method;
-import java.util.List;
+// --- NEW IMPORTS FOR HARDWARE CONTROL ---
+import com.sony.scalar.sysutil.NetworkManager;
+import com.github.ma1co.openmemories.framework.network.WifiDirectManager;
 
 /**
  * JPEG.CAM Manager: Connectivity & Networking
- * Manages Wi-Fi, Hotspot, and the JPEG.CAM Dashboard server.
+ * Manages Wi-Fi, Hotspot, and the JPEG.CAM Dashboard server safely via Sony RTOS APIs.
  */
 public class ConnectivityManager {
     private Context context;
     private WifiManager wifiManager;
     private android.net.ConnectivityManager connManager;
-    private DirectManager directManager;
+    
+    // --- SONY HARDWARE MANAGERS ---
+    private NetworkManager scalarNetManager;
+    private WifiDirectManager hotspotManager;
+    
     private HttpServer server;
-
-    private BroadcastReceiver wifiReceiver;
-    private BroadcastReceiver directStateReceiver;
-    private BroadcastReceiver groupCreateSuccessReceiver;
-    private BroadcastReceiver groupCreateFailureReceiver;
 
     private Handler wifiPollHandler;
     private Runnable wifiPollRunnable;
@@ -52,8 +45,11 @@ public class ConnectivityManager {
         this.listener = listener;
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        // Standard Sony initialization (Will gracefully return null on Gen 3 cameras)
-        this.directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+        
+        // Initialize Sony Hardware wrappers
+        this.scalarNetManager = new NetworkManager();
+        this.hotspotManager = new WifiDirectManager(context.getApplicationContext());
+        
         this.server = new HttpServer(context);
     }
 
@@ -73,48 +69,65 @@ public class ConnectivityManager {
     public void startHomeWifi() {
         stopNetworking(); 
         isHomeWifiRunning = true;
-        updateStatus("WIFI", "Connecting to Router...");
-        
-        // Ensure Wi-Fi is physically enabled
-        if (!wifiManager.isWifiEnabled()) {
-            wifiManager.setWifiEnabled(true);
-        } else {
-            wifiManager.reconnect();
+        updateStatus("WIFI", "Waking up hardware...");
+
+        // 1. WAKE UP SONY HARDWARE FIRST to prevent the 15-second kernel panic
+        try {
+            scalarNetManager.enableWifi();
+        } catch (Exception e) {
+            // Ignore, move to android fallback if unavailable
         }
 
-        wifiPollHandler = new Handler();
-        wifiPollRunnable = new Runnable() {
-            int attempts = 0;
+        // Give the chip 1 second to boot before hammering it with Android scans
+        new Handler().postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (!isHomeWifiRunning) return;
-
-                NetworkInfo info = connManager.getNetworkInfo(android.net.ConnectivityManager.TYPE_WIFI);
-                if (info != null && info.isConnected()) {
-                    WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-                    int ip = wifiInfo.getIpAddress();
-                    if (ip != 0) {
-                        String ipAddress = String.format("%d.%d.%d.%d", (ip & 0xff), (ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
-                        updateStatus("WIFI", "http://" + ipAddress + ":" + HttpServer.PORT);
-                        startServer();
-                        setAutoPowerOffMode(false); 
-                        return; // Successfully connected, stop polling
-                    }
-                }
-
-                attempts++;
-                if (attempts > 15) { // 30 seconds total (15 attempts * 2 seconds)
-                    updateStatus("WIFI", "Timed out.");
-                    stopNetworking();
+                
+                updateStatus("WIFI", "Connecting to Router...");
+                
+                // 2. NOW USE STANDARD ANDROID WIFI
+                if (!wifiManager.isWifiEnabled()) {
+                    wifiManager.setWifiEnabled(true);
                 } else {
-                    updateStatus("WIFI", "Searching... (" + attempts + "/15)");
-                    wifiPollHandler.postDelayed(this, 2000); // Poll again in 2 seconds
+                    wifiManager.reconnect();
                 }
-            }
-        };
 
-        // Start the polling loop
-        wifiPollHandler.postDelayed(wifiPollRunnable, 2000);
+                wifiPollHandler = new Handler();
+                wifiPollRunnable = new Runnable() {
+                    int attempts = 0;
+                    @Override
+                    public void run() {
+                        if (!isHomeWifiRunning) return;
+
+                        NetworkInfo info = connManager.getNetworkInfo(android.net.ConnectivityManager.TYPE_WIFI);
+                        if (info != null && info.isConnected()) {
+                            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                            int ip = wifiInfo.getIpAddress();
+                            if (ip != 0) {
+                                String ipAddress = String.format("%d.%d.%d.%d", (ip & 0xff), (ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
+                                updateStatus("WIFI", "http://" + ipAddress + ":" + HttpServer.PORT);
+                                startServer();
+                                setAutoPowerOffMode(false); 
+                                return; // Successfully connected, stop polling
+                            }
+                        }
+
+                        attempts++;
+                        if (attempts > 15) { // 30 seconds total
+                            updateStatus("WIFI", "Timed out.");
+                            stopNetworking();
+                        } else {
+                            updateStatus("WIFI", "Searching... (" + attempts + "/15)");
+                            wifiPollHandler.postDelayed(this, 2000); // Poll again in 2 seconds
+                        }
+                    }
+                };
+
+                // Start the polling loop
+                wifiPollHandler.postDelayed(wifiPollRunnable, 2000);
+            }
+        }, 1000);
     }
 
     public void startHotspot() {
@@ -122,115 +135,38 @@ public class ConnectivityManager {
         isHotspotRunning = true;
         updateStatus("HOTSPOT", "Starting Hotspot...");
 
-        // --- GEN 2 LOGIC (A5100) ---
-        if (directManager == null) {
-            directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
-        }
-
-        if (directManager != null) {
-            // Ensure Wi-Fi is enabled first for Gen 2 DirectManager
-            if (!wifiManager.isWifiEnabled()) {
-                wifiManager.setWifiEnabled(true);
-            }
-
-            directStateReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (intent.getIntExtra(DirectManager.EXTRA_DIRECT_STATE, DirectManager.DIRECT_STATE_UNKNOWN) == DirectManager.DIRECT_STATE_ENABLED) {
-                        List<DirectConfiguration> configs = directManager.getConfigurations();
-                        if (configs != null && !configs.isEmpty()) {
-                            directManager.startGo(configs.get(configs.size() - 1).getNetworkId());
-                        } else {
-                            updateStatus("HOTSPOT", "Error: No Configs");
-                            stopNetworking();
-                        }
-                    }
-                }
-            };
-            
-            groupCreateSuccessReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    DirectConfiguration config = intent.getParcelableExtra(DirectManager.EXTRA_DIRECT_CONFIG);
-                    if (config != null) {
-                        String password = "N/A";
-                        try {
-                            // Bypass the local OpenMemories stub JAR compiler limitation via Reflection
-                            Method getPassphrase = config.getClass().getMethod("getPassphrase");
-                            password = (String) getPassphrase.invoke(config);
-                        } catch (Exception e1) {
-                            try {
-                                Method getPassword = config.getClass().getMethod("getPassword");
-                                password = (String) getPassword.invoke(config);
-                            } catch (Exception e2) {
-                                password = "Error";
-                            }
-                        }
-                        updateStatus("HOTSPOT", "PW: " + password + " (192.168.122.1)");
-                        startServer();
-                        setAutoPowerOffMode(false); 
-                    }
-                }
-            };
-
-            groupCreateFailureReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    updateStatus("HOTSPOT", "Hardware Error: Retry");
-                    stopNetworking();
-                }
-            };
-            
-            context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
-            context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
-            context.registerReceiver(groupCreateFailureReceiver, new IntentFilter(DirectManager.GROUP_CREATE_FAILURE_ACTION));
-
-            directManager.setDirectEnabled(true);
-            return;
-        }
-
-        // --- GEN 3 LOGIC (A7II, A6500) FALLBACK ---
-        // If DirectManager is completely absent, use pure Android Reflection to force standard AP Tethering
         try {
-            // THE FIX: Gen 3 hardware cannot be a Client and a Hotspot simultaneously.
-            // We MUST turn the client radio off before starting the Access Point via reflection.
-            if (wifiManager.isWifiEnabled()) {
-                wifiManager.setWifiEnabled(false);
-            }
+            // 1. WAKE UP SONY HARDWARE FIRST
+            try {
+                scalarNetManager.enableWifi();
+            } catch (Exception e) {}
 
-            Method setWifiApEnabled = wifiManager.getClass().getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
-            boolean success = (Boolean) setWifiApEnabled.invoke(wifiManager, null, true);
-            
-            if (success) {
-                // Fetch the system's generated password
-                Method getWifiApConfiguration = wifiManager.getClass().getMethod("getWifiApConfiguration");
-                WifiConfiguration apConfig = (WifiConfiguration) getWifiApConfiguration.invoke(wifiManager);
-                
-                if (apConfig != null) {
-                    updateStatus("HOTSPOT", "PW: " + apConfig.preSharedKey + " (192.168.43.1)");
-                } else {
-                    updateStatus("HOTSPOT", "Connect Phone (192.168.43.1)");
+            // 2. USE OPENMEMORIES WRAPPER (Handles Gen 2 and Gen 3 natively)
+            hotspotManager.enable();
+
+            // Give the antenna 2 seconds to physically broadcast and assign the password
+            new Handler().postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isHotspotRunning) return;
+                    
+                    String pwd = hotspotManager.getPassword();
+                    if (pwd == null || pwd.isEmpty()) {
+                        updateStatus("HOTSPOT", "Hardware Error. Retry.");
+                        stopNetworking();
+                        return;
+                    }
+                    
+                    // The standard IP for Sony Direct connections is 192.168.122.1
+                    updateStatus("HOTSPOT", "PW: " + pwd + " (192.168.122.1)");
+                    startServer();
+                    setAutoPowerOffMode(false); 
                 }
-                startServer();
-                setAutoPowerOffMode(false); 
-            } else {
-                updateStatus("HOTSPOT", "Hardware Unsupported");
-                isHotspotRunning = false;
-            }
+            }, 2000);
+
         } catch (Exception e) {
             updateStatus("HOTSPOT", "Error: " + e.getMessage());
             isHotspotRunning = false;
-        }
-    }
-
-    // Safety wrapper to prevent the "Exit Crash"
-    private void unregisterReceiverSafe(BroadcastReceiver receiver) {
-        if (receiver != null) {
-            try {
-                context.unregisterReceiver(receiver);
-            } catch (Exception e) {
-                // Ignore if it was never fully registered
-            }
         }
     }
 
@@ -244,34 +180,21 @@ public class ConnectivityManager {
             wifiPollRunnable = null;
         }
 
-        // Safely kill all receivers to prevent camera crashes
-        unregisterReceiverSafe(wifiReceiver);
-        wifiReceiver = null;
-        unregisterReceiverSafe(directStateReceiver);
-        directStateReceiver = null;
-        unregisterReceiverSafe(groupCreateSuccessReceiver);
-        groupCreateSuccessReceiver = null;
-        unregisterReceiverSafe(groupCreateFailureReceiver);
-        groupCreateFailureReceiver = null;
-
         if (isHomeWifiRunning) {
             try { wifiManager.disconnect(); } catch (Exception e) {}
             isHomeWifiRunning = false;
         }
         
         if (isHotspotRunning) {
-            // Cleanup Gen 2
-            try { if (directManager != null) directManager.setDirectEnabled(false); } catch (Exception e) {}
-            
-            // Cleanup Gen 3 (Turn off Android Tethering)
-            try {
-                Method setWifiApEnabled = wifiManager.getClass().getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
-                setWifiApEnabled.invoke(wifiManager, null, false);
-            } catch (Exception e) {}
-
+            try { hotspotManager.disable(); } catch (Exception e) {}
             isHotspotRunning = false;
         }
         
+        // --- BATTERY SAVER: POWER OFF PHYSICAL HARDWARE ---
+        try {
+            scalarNetManager.disableWifi();
+        } catch (Exception e) {}
+
         updateStatus("WIFI", "Press ENTER to Start");
         updateStatus("HOTSPOT", "Press ENTER to Start");
         setAutoPowerOffMode(true); 
