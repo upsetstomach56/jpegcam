@@ -200,17 +200,19 @@ public class ConnectivityManager {
                             if (config != null) {
                                 String password = "N/A";
                                 
-                                // --- THE PASSWORD FIX ---
-                                // Because we are compiling against ma1co's stubs, we can 
-                                // call this natively without reflection!
+                                // --- THE PASSWORD FIX (REFLECTION) ---
+                                // Bypasses the incomplete ma1co compile-time stubs to find the password at runtime
                                 try {
-                                    password = config.getPassphrase();
-                                } catch (NoSuchMethodError e) {
+                                    Method getPassphrase = config.getClass().getMethod("getPassphrase");
+                                    password = (String) getPassphrase.invoke(config);
+                                } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
                                     // Fallback for weird firmware variants
                                     try {
                                         Method m = config.getClass().getMethod("getNetworkKey");
                                         password = (String) m.invoke(config);
-                                    } catch (Exception ex) {}
+                                    } catch (Exception ex) {
+                                        // If all else fails, keep "N/A"
+                                    }
                                 }
                                 
                                 updateStatus("HOTSPOT", "PW: " + password + " (192.168.122.1)");
