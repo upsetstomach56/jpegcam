@@ -19,7 +19,7 @@ public class InputManager {
         void onDownPressed();
         void onLeftPressed();
         void onRightPressed();
-        void onCustomButtonPressed();
+        void onCustomButtonPressed(); // Left safely in interface so it doesn't break other files
         
         // --- 3-DIAL SETUP RESTORED ---
         void onFrontDialRotated(int direction);
@@ -79,16 +79,7 @@ public class InputManager {
             return true;
         }
 
-        // --- UNIFIED CUSTOM BUTTON (The "Omni-Button") ---
-        // Catches C1, C2, and AEL explicitly using raw hardware ScanCodes (622, 623, 638)
-        // as well as the standard Sony Framework constants.
-        if (sc == 622 || sc == 623 || sc == 638 || 
-            sc == ScalarInput.ISV_KEY_CUSTOM1 || sc == ScalarInput.ISV_KEY_CUSTOM2 || 
-            sc == ScalarInput.ISV_KEY_CUSTOM3 || sc == ScalarInput.ISV_KEY_AEL) {
-            
-            listener.onCustomButtonPressed();
-            return true;
-        }
+        // DELETED: Omni-Button interceptor block. Custom buttons will now pass to Sony OS.
 
         // --- UNIFIED DIAL TRANSLATOR (Front, Rear, Control Wheel & a6500 Hacks) ---
         if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE || 
@@ -120,7 +111,7 @@ public class InputManager {
             return true;
         }
 
-        return false;
+        return false; // Tells the Sony OS: "We didn't use this button, you take it!"
     }
 
     /**
@@ -133,12 +124,7 @@ public class InputManager {
             return true;
         }
 
-        // Swallow custom button releases so native OS features don't trigger
-        if (sc == 622 || sc == 623 || sc == 638 || 
-            sc == ScalarInput.ISV_KEY_CUSTOM1 || sc == ScalarInput.ISV_KEY_CUSTOM2 || 
-            sc == ScalarInput.ISV_KEY_CUSTOM3 || sc == ScalarInput.ISV_KEY_AEL) {
-            return true;
-        }
+        // DELETED: Omni-Button release interceptor block.
         
         // Ensure Mode Dial releases are also swallowed safely
         if (sc == ScalarInput.ISV_KEY_MODE_DIAL || 
