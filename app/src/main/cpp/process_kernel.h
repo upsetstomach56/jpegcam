@@ -838,7 +838,7 @@ inline void process_row_rgb(
     int grain, int grainSize, int scaleDenom, int advancedGrainExperimental, uint32_t& seed,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
-    const uint8_t* externalGrainTexture = nullptr) // <-- ADDED ARGUMENT
+    const uint8_t* externalGrainTexture = NULL) // <-- CHANGED from nullptr
 {
     int s_roll   = rollOff * 20;
     int s_chrome = colorChrome * 40;
@@ -965,7 +965,7 @@ inline void process_row_rgb(
         }
 
         // NEW: Engine 2 (Texture Overlay)
-        if (advancedGrainExperimental == 2 && externalGrainTexture != nullptr && grain > 0) {
+        if (advancedGrainExperimental == 2 && externalGrainTexture != NULL && grain > 0) {
             // Fast 512x512 tiling
             int tx = (x * scaleDenom) & 511;
             int ty = (abs_y * scaleDenom) & 511;
@@ -1021,7 +1021,7 @@ inline void process_row_yuv(
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom, int advancedGrainExperimental, uint32_t& seed,
     const uint8_t* rolloff_lut,
-    const uint8_t* externalGrainTexture = nullptr) // <-- ADDED ARGUMENT
+    const uint8_t* externalGrainTexture = NULL) // <-- CHANGED from nullptr
 {
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
@@ -1101,7 +1101,7 @@ inline void process_row_yuv(
         }
 
         // NEW: Engine 2 (Texture Overlay)
-        if (advancedGrainExperimental == 2 && externalGrainTexture != nullptr && grain > 0) {
+        if (advancedGrainExperimental == 2 && externalGrainTexture != NULL && grain > 0) {
             int tx = (x * scaleDenom) & 511;
             int ty = (abs_y * scaleDenom) & 511;
             int tex_idx = (ty * 512 + tx) * 3;
