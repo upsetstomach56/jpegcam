@@ -80,32 +80,37 @@ public class Filepaths {
         getAppDir(); getLutDir(); getRecipeDir(); getLensesDir(); getGradedDir(); getGrainDir();
     }
 
-    // NEW: Extracts bundled starter files from the APK to the SD card
+    // NEW: Extracts bundled starter files explicitly (Bypasses API 10 list() bug)
     public static void extractDefaultAssets(android.content.Context context) {
         File grainDir = getGrainDir();
-        try {
-            // Look for files in the APK's "assets/grain" folder
-            String[] assets = context.getAssets().list("grain");
-            if (assets != null) {
-                for (String assetName : assets) {
-                    File outFile = new File(grainDir, assetName);
-                    // Only copy if the file doesn't already exist on the SD card
-                    if (!outFile.exists()) {
-                        java.io.InputStream in = context.getAssets().open("grain/" + assetName);
-                        java.io.FileOutputStream out = new java.io.FileOutputStream(outFile);
-                        byte[] buffer = new byte[1024];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
-                        }
-                        in.close();
-                        out.flush();
-                        out.close();
+        
+        // Hardcoding the exact file names is much safer on Sony's older Android version
+        String[] starterFiles = {
+            "fuji_neopan_400.txt",
+            "kodak_x_plus.txt",
+            "fuji_neopan_400.png",
+            "kodak_x_plus.png"
+        };
+
+        for (String assetName : starterFiles) {
+            try {
+                File outFile = new File(grainDir, assetName);
+                // Only copy if the file doesn't already exist on the SD card
+                if (!outFile.exists()) {
+                    java.io.InputStream in = context.getAssets().open("grain/" + assetName);
+                    java.io.FileOutputStream out = new java.io.FileOutputStream(outFile);
+                    byte[] buffer = new byte[1024];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
                     }
+                    in.close();
+                    out.flush();
+                    out.close();
+                    android.util.Log.d("JPEG.CAM", "Successfully extracted: " + assetName);
                 }
+            } catch (Exception e) {
+                android.util.Log.e("JPEG.CAM", "Failed to extract " + assetName + ": " + e.getMessage());
             }
-        } catch (Exception e) {
-            android.util.Log.e("JPEG.CAM", "Failed to extract grain assets: " + e.getMessage());
         }
     }
-}
