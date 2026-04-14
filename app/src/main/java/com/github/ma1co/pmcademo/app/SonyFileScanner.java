@@ -84,6 +84,52 @@ public class SonyFileScanner {
         }, 500);
     }
 
+    // NEW: Lightweight PNG Metadata parser (Avoids OOM by skipping image data)
+    public static String getGrainTitle(File file) {
+        String name = file.getName();
+        if (name.toLowerCase().endsWith(".png")) {
+            try {
+                java.io.FileInputStream fis = new java.io.FileInputStream(file);
+                byte[] header = new byte[8];
+                fis.read(header); // Skip PNG signature
+                
+                while (true) {
+                    byte[] lenBuf = new byte[4];
+                    if (fis.read(lenBuf) < 4) break;
+                    int len = ((lenBuf[0] & 0xFF) << 24) | ((lenBuf[1] & 0xFF) << 16) | 
+                              ((lenBuf[2] & 0xFF) << 8) | (lenBuf[3] & 0xFF);
+                    
+                    byte[] typeBuf = new byte[4];
+                    if (fis.read(typeBuf) < 4) break;
+                    String type = new String(typeBuf, "US-ASCII");
+
+                    // Stop searching if we hit the heavy image data to save RAM
+                    if (type.equals("IDAT") || type.equals("IEND")) break; 
+
+                    if (type.equals("tEXt")) {
+                        byte[] data = new byte[len];
+                        fis.read(data);
+                        String textChunk = new String(data, "ISO-8859-1");
+                        if (textChunk.startsWith("Title\0")) {
+                            fis.close();
+                            return textChunk.substring(6); // Return everything after "Title\0"
+                        }
+                    } else {
+                        fis.skip(len); // Skip irrelevant chunk data
+                    }
+                    fis.skip(4); // Skip 4-byte CRC
+                }
+                fis.close();
+            } catch (Exception e) {
+                // Silently fallback on failure
+            }
+        }
+        
+        // Fallback: Just return the filename minus the extension (.png / .jpg)
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
     private void findNewestFile(boolean triggerCallback) {
         File dcimDir = Filepaths.getDcimDir(); 
         if (!dcimDir.exists() || !dcimDir.isDirectory()) return;

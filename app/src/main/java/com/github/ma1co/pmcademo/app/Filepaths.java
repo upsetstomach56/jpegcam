@@ -41,6 +41,17 @@ public class Filepaths {
         return def;
     }
 
+    // NEW: Path to the external Grain Textures
+    public static File getGrainDir() {
+        for (File root : getStorageRoots()) {
+            File dir = new File(root, "JPEGCAM/GRAIN");
+            if (dir.exists()) return dir;
+        }
+        File def = new File(getAppDir(), "GRAIN");
+        if (!def.exists()) def.mkdirs();
+        return def;
+    }
+
     public static File getDcimDir() {
         // Iterate through all roots (SD cards first)
         for (File root : getStorageRoots()) {

@@ -12,6 +12,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,15 +24,43 @@ import java.util.List;
  * Class decomposition.
  *
  * Architecture:
- *   - Builds and owns the menuContainer view tree in its constructor
- *   - Exposes open()/close() and directional navigation methods
- *   - Uses HostCallback for cross-cutting concerns (preferences, hardware)
- *   - CHARSET is public so HudController can reference it for naming mode
+ * - Builds and owns the menuContainer view tree in its constructor
+ * - Exposes open()/close() and directional navigation methods
+ * - Uses HostCallback for cross-cutting concerns (preferences, hardware)
+ * - CHARSET is public so HudController can reference it for naming mode
  */
 public class MenuController {
 
     /** Character set used for on-camera name entry (menu AND HUD naming modes). */
     public static final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
+
+    // --- NEW: Caches the physical files so their indexes match the menu ---
+    public static java.util.List<File> grainTextureFiles = new java.util.ArrayList<File>();
+
+    public static String[] getGrainEngineOptions() {
+        java.util.List<String> options = new java.util.ArrayList<String>();
+        options.add("LEGACY");
+        options.add("EXPERIMENTAL");
+
+        grainTextureFiles.clear();
+        File dir = Filepaths.getGrainDir();
+        if (dir.exists() && dir.isDirectory()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                java.util.Arrays.sort(files); // Keep them alphabetical
+                for (File f : files) {
+                    String name = f.getName().toLowerCase();
+                    if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+                        grainTextureFiles.add(f);
+                        String title = SonyFileScanner.getGrainTitle(f);
+                        options.add(title.toUpperCase()); // Keep menu text uppercase
+                    }
+                }
+            }
+        }
+        return options.toArray(new String[0]);
+    }
+    // --- END NEW ---
 
     // -----------------------------------------------------------------------
     // Host callback
@@ -448,7 +477,13 @@ public class MenuController {
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
             else if (sel == 3 && p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
-            else if (sel == 4 && p.grain > 0) p.advancedGrainExperimental = Math.max(0, Math.min(1, p.advancedGrainExperimental + dir));
+            
+            // CHANGED: Use the dynamic array length instead of locking to 1
+            else if (sel == 4 && p.grain > 0) {
+                int maxEngineIndex = getGrainEngineOptions().length - 1;
+                p.advancedGrainExperimental = Math.max(0, Math.min(maxEngineIndex, p.advancedGrainExperimental + dir));
+            }
+            
             else if (sel == 5) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
             if (sel == 0) p.rollOff        = Math.max(0, Math.min(5, p.rollOff + dir));
@@ -572,12 +607,16 @@ public class MenuController {
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
                 ic = 6;
-                String[] engineLbls = {"LEGACY", "EXPERIMENTAL"};
+                
+                // CHANGED: Load dynamic labels and calculate the safe index
+                String[] engineLbls = getGrainEngineOptions();
+                int safeEngineIdx = Math.max(0, Math.min(engineLbls.length - 1, p.advancedGrainExperimental));
+
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
                 setRow(3, "Grain Size",  sizeLbls[Math.max(0,Math.min(2,p.grainSize))]);
-                setRow(4, "Grain Engine",engineLbls[Math.max(0,Math.min(1,p.advancedGrainExperimental))]);
+                setRow(4, "Grain Engine",engineLbls[safeEngineIdx]); // CHANGED
                 setRow(5, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
                 ic = 7; // CHANGED TO 7
