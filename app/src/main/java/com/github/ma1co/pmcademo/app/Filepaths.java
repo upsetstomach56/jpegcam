@@ -84,18 +84,24 @@ public class Filepaths {
     public static void extractDefaultAssets(android.content.Context context) {
         File grainDir = getGrainDir();
         
-        // Hardcoding the exact file names is much safer on Sony's older Android version
+        // Force-create the directory right before extracting, just in case
+        if (!grainDir.exists()) {
+            grainDir.mkdirs();
+        }
+        
+        // STRICT 8.3 FILENAME COMPLIANCE FOR SONY FAT32 SD CARDS
         String[] starterFiles = {
-            "fuji_neopan_400.txt",
-            "kodak_x_plus.txt",
-            "fuji_neopan_400.png",
-            "kodak_x_plus.png"
+            "xplus.png",
+            "xplus.txt",
+            "neo400.png",
+            "neo400.txt"
         };
 
         for (String assetName : starterFiles) {
             try {
                 File outFile = new File(grainDir, assetName);
-                // Only copy if the file doesn't already exist on the SD card
+                
+                // Only extract if it doesn't already exist on the SD card
                 if (!outFile.exists()) {
                     java.io.InputStream in = context.getAssets().open("grain/" + assetName);
                     java.io.FileOutputStream out = new java.io.FileOutputStream(outFile);
