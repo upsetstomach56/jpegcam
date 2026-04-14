@@ -1491,6 +1491,7 @@ public void onEnterPressed() {
                     android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
+        }
         
         applyHardwareRecipe();
         
