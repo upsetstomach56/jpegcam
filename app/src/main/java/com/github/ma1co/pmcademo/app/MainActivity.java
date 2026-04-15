@@ -242,13 +242,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- AUTOMATIC HARDWARE SCANNER ---
         // --- UNIVERSAL FEATURE DETECTION ---
-        // Older cameras (a5100/a6000) run Android 2.3.7 (API 10) and will crash if we
-        // blindly call the API 11 static method deviceHasKey. We wrap it in a safe catch block.
+        // Legacy cameras (API 10) will crash with a Dalvik "VerifyError" before the app opens 
+        // if we explicitly write new API methods. We use Reflection to hide it from the scanner!
         hasPhysicalPasmDial = false;
         try {
-            hasPhysicalPasmDial = android.view.KeyCharacterMap.deviceHasKey(624) || 
-                                  android.view.KeyCharacterMap.deviceHasKey(ScalarInput.ISV_KEY_MODE_DIAL);
-        } catch (Throwable t) {
+            java.lang.reflect.Method deviceHasKeyMethod = android.view.KeyCharacterMap.class.getMethod("deviceHasKey", int.class);
+            boolean hasDialKey1 = (Boolean) deviceHasKeyMethod.invoke(null, 624);
+            boolean hasDialKey2 = (Boolean) deviceHasKeyMethod.invoke(null, com.sony.scalar.sysutil.ScalarInput.ISV_KEY_MODE_DIAL);
+            hasPhysicalPasmDial = hasDialKey1 || hasDialKey2;
+        } catch (Exception e) {
             android.util.Log.e("JPEG.CAM", "Legacy API 10 Camera Detected. Relying on dynamic dial auto-discovery.");
         }
         
@@ -923,7 +925,11 @@ public void onEnterPressed() {
                 }
             } else {
                 // NEW: Clear inherited focus areas so Sony doesn't reject the AF-S/AF-C change
-                if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                if (android.os.Build.VERSION.SDK_INT >= 14) {
+                    try {
+                        if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    } catch (Throwable t) {}
+                }
                 if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
                 
                 p.setFocusMode(nextVirtual);
@@ -1478,7 +1484,11 @@ public void onEnterPressed() {
                     // --- NEW: CLEAN FOCUS INHERITANCE ---
                     // Sony hardware silently rejects AF mode changes if an incompatible
                     // Focus Area (like Flexible Spot) was inherited from the native OS.
-                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    if (android.os.Build.VERSION.SDK_INT >= 14) {
+                        try {
+                            if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                        } catch (Throwable t) {}
+                    }
                     if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
                     c.setParameters(p); // Apply clean slate immediately
                     
