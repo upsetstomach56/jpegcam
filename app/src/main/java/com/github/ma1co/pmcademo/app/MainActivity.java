@@ -242,12 +242,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- AUTOMATIC HARDWARE SCANNER ---
         // --- UNIVERSAL FEATURE DETECTION ---
-        // Instead of guessing model names, we ask the Android Kernel if the 
-        // physical keypad matrix has a Mode Dial wired into it.
-        boolean hasDialKey1 = android.view.KeyCharacterMap.deviceHasKey(624);
-        boolean hasDialKey2 = android.view.KeyCharacterMap.deviceHasKey(ScalarInput.ISV_KEY_MODE_DIAL);
+        // Older cameras (a5100/a6000) run Android 2.3.7 (API 10) and will crash if we
+        // blindly call the API 11 static method deviceHasKey. We wrap it in a safe catch block.
+        hasPhysicalPasmDial = false;
+        try {
+            hasPhysicalPasmDial = android.view.KeyCharacterMap.deviceHasKey(624) || 
+                                  android.view.KeyCharacterMap.deviceHasKey(ScalarInput.ISV_KEY_MODE_DIAL);
+        } catch (Throwable t) {
+            android.util.Log.e("JPEG.CAM", "Legacy API 10 Camera Detected. Relying on dynamic dial auto-discovery.");
+        }
         
-        hasPhysicalPasmDial = hasDialKey1 || hasDialKey2;
         android.util.Log.e("JPEG.CAM", "Universal Dial Detection: " + hasPhysicalPasmDial);
         
         // Force creation of our JPEGCAM folder skeleton immediately on boot
