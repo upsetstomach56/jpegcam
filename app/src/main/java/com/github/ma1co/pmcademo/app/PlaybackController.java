@@ -204,7 +204,12 @@ public class PlaybackController {
             }
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
-            opts.inPreferredConfig  = Bitmap.Config.RGB_565; // halves RAM vs ARGB_8888
+            
+            // REVERTED to 16-bit color. ARGB_8888 is too heavy for the BIONZ heap.
+            // Dithering is kept ON to smooth out the resulting color bands.
+            opts.inPreferredConfig  = Bitmap.Config.RGB_565; 
+            opts.inDither           = true; 
+            
             opts.inPurgeable        = true;
             opts.inInputShareable   = true;
 

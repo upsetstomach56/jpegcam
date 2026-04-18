@@ -242,16 +242,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- AUTOMATIC HARDWARE SCANNER ---
         // --- UNIVERSAL FEATURE DETECTION ---
-        // Instead of guessing model names, we ask the Android Kernel if the 
-        // physical keypad matrix has a Mode Dial wired into it.
-        boolean hasDialKey1 = android.view.KeyCharacterMap.deviceHasKey(624);
-        boolean hasDialKey2 = android.view.KeyCharacterMap.deviceHasKey(ScalarInput.ISV_KEY_MODE_DIAL);
+        // Legacy cameras (API 10) will crash with a Dalvik "VerifyError" before the app opens 
+        // if we explicitly write new API methods. We use Reflection to hide it from the scanner!
+        hasPhysicalPasmDial = false;
+        try {
+            java.lang.reflect.Method deviceHasKeyMethod = android.view.KeyCharacterMap.class.getMethod("deviceHasKey", int.class);
+            boolean hasDialKey1 = (Boolean) deviceHasKeyMethod.invoke(null, 624);
+            boolean hasDialKey2 = (Boolean) deviceHasKeyMethod.invoke(null, com.sony.scalar.sysutil.ScalarInput.ISV_KEY_MODE_DIAL);
+            hasPhysicalPasmDial = hasDialKey1 || hasDialKey2;
+        } catch (Exception e) {
+            android.util.Log.e("JPEG.CAM", "Legacy API 10 Camera Detected. Relying on dynamic dial auto-discovery.");
+        }
         
-        hasPhysicalPasmDial = hasDialKey1 || hasDialKey2;
         android.util.Log.e("JPEG.CAM", "Universal Dial Detection: " + hasPhysicalPasmDial);
         
         // Force creation of our JPEGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
+
+        // --- NEW: Extract our starter pack ---
+        Filepaths.extractDefaultAssets(this);
         
         File thumbsDir = new File(Filepaths.getDcimDir(), ".thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
@@ -305,11 +314,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
-                // --- FIXED: Added shadowToe, subtractiveSat, and halation to the trigger ---
-                return isReady && !isProcessing && !calibController.isCalibrating() && 
-                       (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || 
+                return isReady && !isProcessing && !calibController.isCalibrating() &&
+                       (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
                         p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
-                        p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0); 
+                        p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
+                        p.bloom != 0);
             }
             @Override 
             public void onNewPhotoDetected(final String path) { 
@@ -355,7 +364,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
                     File outDir = Filepaths.getGradedDir();
-                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile());
+                    // --- CHANGED: Added prefShowCinemaMattes to the end ---
+                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes);
                 } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
                     retries[0]++;
@@ -372,6 +382,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void triggerLutPreload() {
         RTLProfile p = recipeManager.getCurrentProfile();
+        if (p.lutIndex == 0) {
+            // No LUT selected, engine is ready immediately for other effects
+            isReady = true;
+            updateMainHUD();
+            return;
+        }
         mProcessor.triggerLutPreload(recipeManager.getRecipePaths().get(p.lutIndex), recipeManager.getRecipeNames().get(p.lutIndex));
     }
 
@@ -908,9 +924,22 @@ public void onEnterPressed() {
                     lensManager.clearCurrentProfile();
                 }
             } else {
+                // NEW: Clear inherited focus areas so Sony doesn't reject the AF-S/AF-C change
+                if (android.os.Build.VERSION.SDK_INT >= 14) {
+                    try {
+                        if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    } catch (Throwable t) {}
+                }
+                if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+                
                 p.setFocusMode(nextVirtual);
             }
-            try { c.setParameters(p); } catch (Exception e) {}
+            
+            try { 
+                c.setParameters(p); 
+            } catch (Exception e) {
+                android.util.Log.e("JPEG.CAM", "Failed to set focus mode: " + e.getMessage());
+            }
         }
         updateMainHUD(); 
     }
@@ -1266,7 +1295,14 @@ public void onEnterPressed() {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        System.exit(0); // Restored to clear memory leaks on shutdown
+        
+        // CRITICAL: Shut down the networking and hardware antenna FIRST
+        // to prevent battery drain after the app closes.
+        if (connectivityManager != null) {
+            connectivityManager.shutdown();
+        }
+
+        System.exit(0); // THEN exit to clear memory leaks
     }
     
     private void setHUDVisibility(int v) { 
@@ -1444,11 +1480,35 @@ public void onEnterPressed() {
                 try {
                     Camera c = cameraManager.getCamera();
                     Camera.Parameters p = c.getParameters();
+                    
+                    // --- NEW: CLEAN FOCUS INHERITANCE ---
+                    // Sony hardware silently rejects AF mode changes if an incompatible
+                    // Focus Area (like Flexible Spot) was inherited from the native OS.
+                    if (android.os.Build.VERSION.SDK_INT >= 14) {
+                        try {
+                            if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                        } catch (Throwable t) {}
+                    }
+                    if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+                    c.setParameters(p); // Apply clean slate immediately
+                    
                     cachedIsManualFocus = "manual".equals(p.getFocusMode());
                     
-                    // UNIVERSAL SENSOR DETECTION: Full frame cameras support APS-C crop mode switching.
-                    isFullFrame = "true".equals(p.get("apsc-mode-supported"));
-                    android.util.Log.e("JPEG.CAM", "Sensor size detected as: " + (isFullFrame ? "FULL FRAME" : "APS-C"));
+                    // --- NEW: BULLETPROOF SENSOR DETECTION ---
+                    // Older A7 cameras don't expose 'apsc-mode-supported' in parameters.
+                    // We check the physical hardware model name instead.
+                    String model = android.os.Build.MODEL;
+                    boolean hardwareIsFullFrame = model != null && (
+                        model.contains("ILCE-7") || model.contains("ILCE-9") || 
+                        model.contains("ILCE-1") || model.contains("DSC-RX1")
+                    );
+                    
+                    // Check if the user actively turned on APS-C crop mode in the Sony menu
+                    boolean isCropActive = "on".equals(p.get("sony-apsc-mode"));
+                    
+                    isFullFrame = hardwareIsFullFrame && !isCropActive;
+                    
+                    android.util.Log.e("JPEG.CAM", "Model: " + model + " | Sensor: " + (isFullFrame ? "FULL FRAME" : "APS-C"));
                 } catch (Exception e) {
                     android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
