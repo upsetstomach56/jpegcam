@@ -834,6 +834,9 @@ inline void apply_bloom_halation(
     }
 }
 
+// Allow the kernel to check the size of the loaded texture
+extern std::vector<uint8_t> nativeGrainTexture;
+
 // High-fidelity sampler for 1024x1024 textures to prevent aliasing on Proxy/Half
 inline void sample_tex_bilinear_1024(const uint8_t* tex, int x_fp8, int y_fp8, int* outRGB) {
     int x0 = (x_fp8 >> 8) & 1023;
@@ -848,6 +851,43 @@ inline void sample_tex_bilinear_1024(const uint8_t* tex, int x_fp8, int y_fp8, i
         int c10 = tex[(y0 * 1024 + x1) * 3 + c];
         int c01 = tex[(y1 * 1024 + x0) * 3 + c];
         int c11 = tex[(y1 * 1024 + x1) * 3 + c];
+        
+        int top = c00 + (((c10 - c00) * fx) >> 8);
+        int bot = c01 + (((c11 - c01) * fx) >> 8);
+        outRGB[c] = top + (((bot - top) * fy) >> 8);
+    }
+}
+
+// High-fidelity sampler for 512x512 textures with built-in XOR Mirroring
+inline void sample_tex_bilinear_512_xor(const uint8_t* tex, int x_fp8, int y_fp8, int* outRGB) {
+    int px0 = x_fp8 >> 8;
+    int py0 = y_fp8 >> 8;
+    int px1 = px0 + 1;
+    int py1 = py0 + 1;
+    int fx = x_fp8 & 255;
+    int fy = y_fp8 & 255;
+
+    int x00 = px0 & 511; int y00 = py0 & 511;
+    if (((px0 >> 9) ^ (py0 >> 9)) & 1) x00 = 511 - x00;
+    if ((((px0 >> 9) * 3) ^ (py0 >> 9)) & 2) y00 = 511 - y00;
+
+    int x10 = px1 & 511; int y10 = py0 & 511;
+    if (((px1 >> 9) ^ (py0 >> 9)) & 1) x10 = 511 - x10;
+    if ((((px1 >> 9) * 3) ^ (py0 >> 9)) & 2) y10 = 511 - y10;
+
+    int x01 = px0 & 511; int y01 = py1 & 511;
+    if (((px0 >> 9) ^ (py1 >> 9)) & 1) x01 = 511 - x01;
+    if ((((px0 >> 9) * 3) ^ (py1 >> 9)) & 2) y01 = 511 - y01;
+
+    int x11 = px1 & 511; int y11 = py1 & 511;
+    if (((px1 >> 9) ^ (py1 >> 9)) & 1) x11 = 511 - x11;
+    if ((((px1 >> 9) * 3) ^ (py1 >> 9)) & 2) y11 = 511 - y11;
+
+    for (int c = 0; c < 3; c++) {
+        int c00 = tex[(y00 * 512 + x00) * 3 + c];
+        int c10 = tex[(y10 * 512 + x10) * 3 + c];
+        int c01 = tex[(y01 * 512 + x01) * 3 + c];
+        int c11 = tex[(y11 * 512 + x11) * 3 + c];
         
         int top = c00 + (((c10 - c00) * fx) >> 8);
         int bot = c01 + (((c11 - c01) * fx) >> 8);
@@ -997,22 +1037,39 @@ inline void process_row_rgb(
             // Grab the optical density mask from Engine 1 to protect shadows and highlights
             int env = grain_amount_mask(targetY);
             
-            // Optimization: If the mask is 0 (pure black or pure white), skip the heavy math!
             if (env > 0) {
+                // Determine if we loaded a 512 or 1024 texture based on vector size
+                bool is_1024 = (nativeGrainTexture.size() > 1000000);
                 int tr, tg, tb;
 
                 if (scaleDenom == 1) {
-                    // --- FAST PATH (FULL RES): 1:1 Pixel Mapping ---
-                    int tx = x & 1023;
-                    int ty = abs_y & 1023;
-                    int tex_idx = (ty * 1024 + tx) * 3;
-                    tr = externalGrainTexture[tex_idx];
-                    tg = externalGrainTexture[tex_idx + 1];
-                    tb = externalGrainTexture[tex_idx + 2];
+                    if (is_1024) {
+                        // --- FAST PATH (FULL RES): 1024x1024 ---
+                        int tx = x & 1023;
+                        int ty = abs_y & 1023;
+                        int tex_idx = (ty * 1024 + tx) * 3;
+                        tr = externalGrainTexture[tex_idx];
+                        tg = externalGrainTexture[tex_idx + 1];
+                        tb = externalGrainTexture[tex_idx + 2];
+                    } else {
+                        // --- FAST PATH (FULL RES): 512x512 with XOR Mirroring ---
+                        int tx = x & 511;
+                        int ty = abs_y & 511;
+                        if (((x >> 9) ^ (abs_y >> 9)) & 1) tx = 511 - tx;
+                        if ((((x >> 9) * 3) ^ (abs_y >> 9)) & 2) ty = 511 - ty;
+                        int tex_idx = (ty * 512 + tx) * 3;
+                        tr = externalGrainTexture[tex_idx];
+                        tg = externalGrainTexture[tex_idx + 1];
+                        tb = externalGrainTexture[tex_idx + 2];
+                    }
                 } else {
                     // --- HQ PATH (HALF/PROXY): Bilinear Interpolation ---
                     int gRGB[3];
-                    sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    if (is_1024) {
+                        sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    } else {
+                        sample_tex_bilinear_512_xor(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    }
                     tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
                 }
 
@@ -1149,20 +1206,37 @@ inline void process_row_yuv(
             int env = grain_amount_mask(outY);
 
             if (env > 0) {
+                bool is_1024 = (nativeGrainTexture.size() > 1000000);
                 int tr, tg, tb;
 
                 if (scaleDenom == 1) {
-                    // --- FAST PATH (FULL RES): 1:1 Pixel Mapping ---
-                    int tx = x & 1023;
-                    int ty = abs_y & 1023;
-                    int tex_idx = (ty * 1024 + tx) * 3;
-                    tr = externalGrainTexture[tex_idx];
-                    tg = externalGrainTexture[tex_idx + 1];
-                    tb = externalGrainTexture[tex_idx + 2];
+                    if (is_1024) {
+                        // --- FAST PATH (FULL RES): 1024x1024 ---
+                        int tx = x & 1023;
+                        int ty = abs_y & 1023;
+                        int tex_idx = (ty * 1024 + tx) * 3;
+                        tr = externalGrainTexture[tex_idx];
+                        tg = externalGrainTexture[tex_idx + 1];
+                        tb = externalGrainTexture[tex_idx + 2];
+                    } else {
+                        // --- FAST PATH (FULL RES): 512x512 with XOR Mirroring ---
+                        int tx = x & 511;
+                        int ty = abs_y & 511;
+                        if (((x >> 9) ^ (abs_y >> 9)) & 1) tx = 511 - tx;
+                        if ((((x >> 9) * 3) ^ (abs_y >> 9)) & 2) ty = 511 - ty;
+                        int tex_idx = (ty * 512 + tx) * 3;
+                        tr = externalGrainTexture[tex_idx];
+                        tg = externalGrainTexture[tex_idx + 1];
+                        tb = externalGrainTexture[tex_idx + 2];
+                    }
                 } else {
                     // --- HQ PATH (HALF/PROXY): Bilinear Interpolation ---
                     int gRGB[3];
-                    sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    if (is_1024) {
+                        sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    } else {
+                        sample_tex_bilinear_512_xor(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
+                    }
                     tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
                 }
                 

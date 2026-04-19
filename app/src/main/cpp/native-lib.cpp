@@ -168,7 +168,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env,
             return JNI_TRUE;
         } else {
             stbi_image_free(img_data);
-            LOGD("ERROR: Grain Texture must be 512x512 or 1024x1024");
+            LOGD("ERROR: Grain Texture must be exactly 512x512 or 1024x1024");
             return JNI_FALSE;
         }
     }
