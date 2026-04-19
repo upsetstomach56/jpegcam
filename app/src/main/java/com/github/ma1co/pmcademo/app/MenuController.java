@@ -472,7 +472,7 @@ public class MenuController {
                 rm.setCurrentSlot(Math.max(0, Math.min(9, rm.getCurrentSlot() + dir)));
                 host.onLutPreloadNeeded();
             } else if (sel == 2) {
-                String[] styles = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Black & White","Sepia"};
+                String[] styles = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
                 int idx = 0; for (int i = 0; i < styles.length; i++) if (styles[i].equalsIgnoreCase(p.colorMode)) idx = i;
                 p.colorMode = styles[(idx + dir + styles.length) % styles.length];
             } else if (sel == 4) {
