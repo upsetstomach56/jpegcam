@@ -131,7 +131,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private GridLinesView gridLines;
     private CinemaMatteView cinemaMattes;
-    private DiptychOverlayView diptychOverlayView;
+    private DiptychOverlayView diptychOverlay;
     private AdvancedFocusMeterView focusMeter;
     private ProReticleView afOverlay;
     
