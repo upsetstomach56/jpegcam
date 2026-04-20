@@ -270,7 +270,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
 
         SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
-        prefShowFocusMeter = prefs.getBoolean("focusMeter", true);
+        prefShowFocusMeter = prefs.getBoolean("focusMeter", false); // CHANGED: Default OFF
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", true);
         prefJpegQuality = prefs.getInt("jpegQuality", 95);
@@ -414,7 +414,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    private boolean isMagnifierActive = false; // Tracks if Sony OS needs the D-Pad
+    private boolean isMagnifierActive = false;
+    private boolean prefShowFocusMeter = false; // CHANGED: Off by default
+    private int magnifierX = 0; // NEW: Track zoom box X
+    private int magnifierY = 0; // NEW: Track zoom box Y
 
     @Override
     public void onShutterHalfPressed() {
@@ -578,9 +581,13 @@ public void onEnterPressed() {
             if (mDialMode == DIAL_MODE_REVIEW) {
                 playbackController.enter();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                calibController.beginWaiting();
-                setHUDVisibility(View.GONE);
-                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
+                // Silent Guard: Only start mapping if user has the meter visible
+                if (prefShowFocusMeter) {
+                    calibController.beginWaiting();
+                    setHUDVisibility(View.GONE);
+                    if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
+                }
+                return true;
             } else {
                 // <--- CHANGED: Replaced HUD hiding with Dial Lock toggle
                 isDialLocked = !isDialLocked;
@@ -593,7 +600,11 @@ public void onEnterPressed() {
 
     @Override
     public boolean onUpPressed() {
-        if (isMagnifierActive) return false;
+        if (isMagnifierActive && cameraManager != null && cameraManager.getCameraEx() != null) {
+            magnifierY = Math.max(-500, magnifierY - 50);
+            cameraManager.getCameraEx().setPreviewMagnification(100, new Pair<Integer, Integer>(magnifierX, magnifierY));
+            return true;
+        }
         
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
@@ -620,7 +631,11 @@ public void onEnterPressed() {
 
     @Override
     public boolean onDownPressed() {
-        if (isMagnifierActive) return false;
+        if (isMagnifierActive && cameraManager != null && cameraManager.getCameraEx() != null) {
+            magnifierY = Math.min(500, magnifierY + 50); // FIXED: Use Math.min to cap at 500
+            cameraManager.getCameraEx().setPreviewMagnification(100, new Pair<Integer, Integer>(magnifierX, magnifierY));
+            return true;
+        }
         
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
@@ -647,7 +662,11 @@ public void onEnterPressed() {
 
     @Override
     public boolean onLeftPressed() {
-        if (isMagnifierActive) return false;
+        if (isMagnifierActive && cameraManager != null && cameraManager.getCameraEx() != null) {
+            magnifierX = Math.max(-500, magnifierX - 50);
+            cameraManager.getCameraEx().setPreviewMagnification(100, new Pair<Integer, Integer>(magnifierX, magnifierY));
+            return true;
+        }
         
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
@@ -673,7 +692,11 @@ public void onEnterPressed() {
 
     @Override
     public boolean onRightPressed() {
-        if (isMagnifierActive) return false;
+        if (isMagnifierActive && cameraManager != null && cameraManager.getCameraEx() != null) {
+            magnifierX = Math.min(500, magnifierX + 50); // FIXED: Use Math.min to cap at 500
+            cameraManager.getCameraEx().setPreviewMagnification(100, new Pair<Integer, Integer>(magnifierX, magnifierY));
+            return true;
+        }
         
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(1);
@@ -737,48 +760,22 @@ public void onEnterPressed() {
         } else if (action == 2) { // FOCUS MAGNIFIER
             if (cameraManager != null && cameraManager.getCameraEx() != null) {
                 com.sony.scalar.hardware.CameraEx cx = cameraManager.getCameraEx();
-                
                 if (isMagnifierActive) {
-                    // Toggle OFF
                     cx.stopPreviewMagnification();
                     isMagnifierActive = false;
                 } else {
-                    // Toggle ON
-                    
-                    // 1. Sony OS requires a listener to activate the hardware scaler
-                    try {
-                        cx.setPreviewMagnificationListener(new com.sony.scalar.hardware.CameraEx.PreviewMagnificationListener() {
-                            @Override
-                            public void onChanged(boolean enabled, int magFactor, int magLevel, android.util.Pair coords, com.sony.scalar.hardware.CameraEx cameraEx) {}
-                            @Override
-                            public void onInfoUpdated(boolean b, android.util.Pair coords, com.sony.scalar.hardware.CameraEx cameraEx) {}
-                        });
-                    } catch (Throwable t) {
-                        android.util.Log.e("JPEG.CAM", "Magnifier Listener Error: " + t.getMessage());
-                    }
-
-                    // 2. Discover the actual supported zoom level for this specific camera
-                    int magLevel = 100; // Fallback
-                    try {
-                        android.hardware.Camera c = cameraManager.getCamera();
-                        if (c != null) {
-                            com.sony.scalar.hardware.CameraEx.ParametersModifier pm = cx.createParametersModifier(c.getParameters());
-                            java.util.List<Integer> supportedMags = (java.util.List<Integer>) pm.getSupportedPreviewMagnification();
-                            if (supportedMags != null && !supportedMags.isEmpty()) {
-                                magLevel = supportedMags.get(0); // Grab the first native hardware step
-                            }
-                        }
-                    } catch (Throwable t) {
-                        android.util.Log.e("JPEG.CAM", "Magnifier Level Error: " + t.getMessage());
-                    }
-
-                    // 3. Fire the zoom command!
-                    android.util.Pair<Integer, Integer> centerPos = new android.util.Pair<Integer, Integer>(0, 0);
-                    cx.setPreviewMagnification(magLevel, centerPos);
+                    // 1. Mandatory Listener for BIONZ X hardware
+                    cx.setPreviewMagnificationListener(new com.sony.scalar.hardware.CameraEx.PreviewMagnificationListener() {
+                        public void onChanged(boolean e, int mf, int ml, Pair c, com.sony.scalar.hardware.CameraEx ex) {}
+                        public void onInfoUpdated(boolean b, Pair c, com.sony.scalar.hardware.CameraEx ex) {}
+                    });
+                    // 2. Trigger at center (0,0) at 100% zoom level
+                    magnifierX = 0; magnifierY = 0;
+                    cx.setPreviewMagnification(100, new Pair<Integer, Integer>(magnifierX, magnifierY));
                     isMagnifierActive = true; 
                 }
             }
-            return true; // Swallow the hardware click!
+            return true; 
         } else if (action == 3) { // TOGGLE FOCUS METER
             setPrefFocusMeter(!isPrefFocusMeter());
             updateMainHUD();
