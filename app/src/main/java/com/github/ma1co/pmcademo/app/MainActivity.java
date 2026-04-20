@@ -683,13 +683,17 @@ public void onEnterPressed() {
     }
 
     @Override
-    public void onCustomButtonPressed() {
+    public boolean onCustomButtonPressed(String keyId) {
         // Do nothing if we are in a menu, looking at photos, or processing
-        if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) return;
+        if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
+            return false; 
+        }
 
-        // Simply jump the HUD cursor directly to the ISO slot
+        // TEMPORARY: Keep your ISO jump working for ALL custom buttons until Chunk 3
         mDialMode = DIAL_MODE_ISO;
         updateMainHUD();
+        
+        return true; // We return true to tell the Sony OS "We used this button, don't do your default action!"
     }
     
     @Override 

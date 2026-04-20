@@ -116,6 +116,7 @@ public class MenuController {
     private String   savedFocusMode    = null;
     private String   hotspotStatus     = "Press ENTER";
     private String   wifiStatus        = "Press ENTER";
+    private String[] cachedColorModes  = null;
 
     // Shared name buffer — also used by HudController for matrix / vault naming
     private char[]   nameBuffer        = "CUSTOM      ".toCharArray();
@@ -447,6 +448,35 @@ public class MenuController {
     // Private — menu data change
     // -----------------------------------------------------------------------
 
+    private String[] getSupportedColorModes() {
+        if (cachedColorModes != null) return cachedColorModes;
+        
+        String[] fallback = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
+        
+        Camera cam = host.getCamera();
+        if (cam != null) {
+            try {
+                Camera.Parameters p = cam.getParameters();
+                String vals = p.get("color-mode-values");
+                if (vals == null) vals = p.get("sony-st-color-mode-values");
+                if (vals == null) vals = p.get("sony-colormode-values");
+                
+                if (vals != null && !vals.isEmpty()) {
+                    String[] split = vals.split(",");
+                    for (int i = 0; i < split.length; i++) {
+                        String s = split[i].trim();
+                        if (s.length() > 0) split[i] = s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+                    }
+                    cachedColorModes = split;
+                    return cachedColorModes;
+                }
+            } catch (Exception e) {
+                // Ignore and use fallback
+            }
+        }
+        return fallback;
+    }
+
     private void handleNamingChange(int dir) {
         RecipeManager rm = host.getRecipeManager();
         RTLProfile p = rm.getCurrentProfile();
@@ -472,7 +502,7 @@ public class MenuController {
                 rm.setCurrentSlot(Math.max(0, Math.min(9, rm.getCurrentSlot() + dir)));
                 host.onLutPreloadNeeded();
             } else if (sel == 2) {
-                String[] styles = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
+                String[] styles = getSupportedColorModes();
                 int idx = 0; for (int i = 0; i < styles.length; i++) if (styles[i].equalsIgnoreCase(p.colorMode)) idx = i;
                 p.colorMode = styles[(idx + dir + styles.length) % styles.length];
             } else if (sel == 4) {
