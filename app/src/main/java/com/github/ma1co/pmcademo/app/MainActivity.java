@@ -455,6 +455,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // SHOT 2: We have both halves! 
             final String rightPath = newPath;
             final String leftPath = diptychLeftPath;
+            final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
             
             // Reset state machine for the next pair
             diptychState = 0;
