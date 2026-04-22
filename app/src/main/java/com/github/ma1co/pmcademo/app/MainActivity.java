@@ -474,17 +474,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         // Apply the current recipe to both halves during downscaling
                         RTLProfile currentProfile = recipeManager.getCurrentProfile();
                         boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 2, 
-                            currentProfile.grain, currentProfile.vignette, currentProfile.rollOff,
-                            currentProfile.colorChrome, currentProfile.chromeBlue, currentProfile.shadowToe,
-                            currentProfile.subtractiveSat, currentProfile.halation, currentProfile.bloom,
-                            currentProfile.lutIndex, currentProfile.matrixIndex, 100, false);
+                            currentProfile.opacity, currentProfile.grain, currentProfile.grainSize,
+                            currentProfile.vignette, currentProfile.rollOff, currentProfile.colorChrome, 
+                            currentProfile.chromeBlue, currentProfile.shadowToe, currentProfile.subtractiveSat, 
+                            currentProfile.halation, currentProfile.bloom, 100, false);
                         if (!lOk) throw new Exception("C++ failed to generate left proxy.");
                         
                         boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 2, 
-                            currentProfile.grain, currentProfile.vignette, currentProfile.rollOff,
-                            currentProfile.colorChrome, currentProfile.chromeBlue, currentProfile.shadowToe,
-                            currentProfile.subtractiveSat, currentProfile.halation, currentProfile.bloom,
-                            currentProfile.lutIndex, currentProfile.matrixIndex, 100, false);
+                            currentProfile.opacity, currentProfile.grain, currentProfile.grainSize,
+                            currentProfile.vignette, currentProfile.rollOff, currentProfile.colorChrome, 
+                            currentProfile.chromeBlue, currentProfile.shadowToe, currentProfile.subtractiveSat, 
+                            currentProfile.halation, currentProfile.bloom, 100, false);
                         if (!rOk) throw new Exception("C++ failed to generate right proxy.");
 
                         // 3. STITCH THE HALVES IN JAVA - MINIMAL PROCESSING
