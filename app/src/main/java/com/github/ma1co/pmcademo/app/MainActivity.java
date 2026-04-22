@@ -437,31 +437,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void handleDiptychCapture(final String newPath) {
         if (diptychState == 0) {
-            // SHOT 1: Save the path and extract the thumbnail for the UI overlay
+            // SHOT 1: Save the path and update the UI to frame the right side
             diptychLeftPath = newPath;
             diptychState = 1;
             isProcessing = false; // Free the scanner for the next shot
             
-            final Bitmap thumb = extractSonyLargeThumbnail(newPath);
-            
             runOnUiThread(new Runnable() {
                 public void run() {
-                    if (diptychOverlay != null) {
-                        diptychOverlay.setThumbnail(thumb);
-                        diptychOverlay.setState(1);
-                    }
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
+                        tvTopStatus.setText("LEFT SAVED. SHOOT RIGHT.");
                         tvTopStatus.setTextColor(Color.GREEN);
                     }
                     updateMainHUD();
                 }
             });
         } else {
-            // SHOT 2: We have both halves!
+            // SHOT 2: We have both halves! 
             final String rightPath = newPath;
             final String leftPath = diptychLeftPath;
-            final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
             
             // Reset state machine for the next pair
             diptychState = 0;
@@ -469,9 +462,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             
             runOnUiThread(new Runnable() {
                 public void run() {
-                    if (diptychOverlay != null) diptychOverlay.setState(0);
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText("STITCHING HIGH-RES DIPTYCH...");
+                        tvTopStatus.setText("STITCHING DIPTYCH...");
                         tvTopStatus.setTextColor(Color.YELLOW);
                     }
                     updateMainHUD();
@@ -504,29 +496,40 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         BitmapFactory.Options opts = new BitmapFactory.Options();
                         opts.inPreferredConfig = Bitmap.Config.RGB_565;
 
-                        android.graphics.BitmapRegionDecoder lDecoder = android.graphics.BitmapRegionDecoder.newInstance(proxyL.getAbsolutePath(), false);
-                        int lW = lDecoder.getWidth(); int lH = lDecoder.getHeight(); int lMid = lW / 2;
-                        
-                        Bitmap composite = Bitmap.createBitmap(lW, lH, Bitmap.Config.RGB_565);
+                        Bitmap bmpL = BitmapFactory.decodeFile(proxyL.getAbsolutePath(), opts);
+                        Bitmap bmpR = BitmapFactory.decodeFile(proxyR.getAbsolutePath(), opts);
+
+                        if (bmpL == null || bmpR == null) throw new Exception("Failed to decode C++ proxies.");
+
+                        int lW = bmpL.getWidth();
+                        int lH = bmpL.getHeight();
+                        int lMid = lW / 2;
+
+                        int rW = bmpR.getWidth();
+                        int rH = bmpR.getHeight();
+                        int rMid = rW / 2;
+
+                        int finalW = lMid + (rW - rMid);
+                        int finalH = Math.min(lH, rH);
+
+                        Bitmap composite = Bitmap.createBitmap(finalW, finalH, Bitmap.Config.RGB_565);
                         android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
 
-                        android.graphics.Rect rL = new android.graphics.Rect(0, 0, lMid, lH);
-                        Bitmap bmpL = lDecoder.decodeRegion(rL, opts); lDecoder.recycle();
-                        canvas.drawBitmap(bmpL, 0, 0, null); bmpL.recycle(); bmpL = null;
+                        android.graphics.Rect srcL = new android.graphics.Rect(0, 0, lMid, lH);
+                        android.graphics.Rect dstL = new android.graphics.Rect(0, 0, lMid, finalH);
+                        canvas.drawBitmap(bmpL, srcL, dstL, null);
+                        bmpL.recycle(); bmpL = null;
 
-                        android.graphics.BitmapRegionDecoder rDecoder = android.graphics.BitmapRegionDecoder.newInstance(proxyR.getAbsolutePath(), false);
-                        int rW = rDecoder.getWidth(); int rH = rDecoder.getHeight(); int rMid = rW / 2;
-
-                        android.graphics.Rect rR = new android.graphics.Rect(rMid, 0, rW, rH);
-                        Bitmap bmpR = rDecoder.decodeRegion(rR, opts); rDecoder.recycle();
-                        android.graphics.Rect destR = new android.graphics.Rect(lMid, 0, lMid + (rW - rMid), Math.min(lH, rH));
-                        canvas.drawBitmap(bmpR, null, destR, null); bmpR.recycle(); bmpR = null;
+                        android.graphics.Rect srcR = new android.graphics.Rect(rMid, 0, rW, rH);
+                        android.graphics.Rect dstR = new android.graphics.Rect(lMid, 0, finalW, finalH);
+                        canvas.drawBitmap(bmpR, srcR, dstR, null);
+                        bmpR.recycle(); bmpR = null;
 
                         // Draw analog center divider
                         android.graphics.Paint dividerPaint = new android.graphics.Paint();
                         dividerPaint.setColor(android.graphics.Color.BLACK);
-                        dividerPaint.setStrokeWidth(Math.max(4, lW / 400));
-                        canvas.drawLine(lMid, 0, lMid, lH, dividerPaint);
+                        dividerPaint.setStrokeWidth(Math.max(4, finalW / 400));
+                        canvas.drawLine(lMid, 0, lMid, finalH, dividerPaint);
 
                         java.io.FileOutputStream out = new java.io.FileOutputStream(rightPath);
                         composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
@@ -537,11 +540,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         proxyL.delete(); proxyR.delete(); tempDir.delete();
                         new File(leftPath).delete();
                         
-                        // 4. Send the stitched proxy through the standard Recipe pipeline
+                        // 3. Send the stitched proxy through the standard Recipe pipeline
                         final File outDir = Filepaths.getGradedDir();
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                // PASS 2 (FULL RES) so the C++ engine doesn't shrink it any further!
+                                // The ImageProcessor's isDiptych=true flag will automatically 
+                                // step down the bloom and grain sizes to perfectly match this canvas!
                                 mProcessor.processJpeg(rightPath, outDir.getAbsolutePath(), 
                                                        2, prefJpegQuality,   
                                                        recipeManager.getCurrentProfile(), prefShowCinemaMattes, true);
@@ -852,11 +858,6 @@ public void onEnterPressed() {
             return true;
         }
         
-        if (prefShowDiptych && diptychState == 1) {
-            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(true);
-            return true;
-        }
-        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
             hudController.update();
@@ -884,11 +885,6 @@ public void onEnterPressed() {
         if (cameraManager != null && cameraManager.isPreviewMagnificationActive()
                 && !playbackController.isActive() && !menuController.isOpen() && !hudController.isActive()) {
             cameraManager.movePreviewMagnification(1, 0);
-            return true;
-        }
-        
-        if (prefShowDiptych && diptychState == 1) {
-            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(false);
             return true;
         }
         
@@ -1969,7 +1965,15 @@ public void onEnterPressed() {
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
-    @Override public void    setPrefDiptych(boolean v)      { prefShowDiptych = v; updateMainHUD(); } // <--- ADDED
+    @Override public void    setPrefDiptych(boolean v)      { 
+        prefShowDiptych = v; 
+        if (!v) {
+            diptychState = 0;
+            diptychLeftPath = null;
+            if (diptychOverlay != null) diptychOverlay.setState(0);
+        }
+        updateMainHUD(); 
+    }
     
 
     @Override public void closeHud() { hudController.reset(); }
