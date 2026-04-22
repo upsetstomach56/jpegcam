@@ -374,13 +374,17 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                                      work_0, work_1, work_2, work_h, h_line, scaleDenom);
             }
 
+            // --- NEW: Generate a random seed based on the millisecond timestamp for temporal variation ---
+            int t_off_x = start_time % 1021; 
+            int t_off_y = (start_time / 13) % 1021;
+
             if (use_rgb_path) {
                 process_row_rgb(
                     rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                     shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                     grain, grainSize, scaleDenom,
                     opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
-                    externalTex, is_1024_grain
+                    externalTex, is_1024_grain, t_off_x, t_off_y
                 );
             } else {
                 process_row_yuv(
@@ -388,7 +392,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                     grain, grainSize, scaleDenom,
                     rolloff_lut,
-                    externalTex, is_1024_grain
+                    externalTex, is_1024_grain, t_off_x, t_off_y
                 );
             }
 

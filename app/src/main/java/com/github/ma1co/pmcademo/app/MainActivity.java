@@ -332,7 +332,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
         @Override public void onProcessFinished(String res) { 
             if (prefShowDiptych) {
-                if ("SAVED".equals(res)) {
+                if (res != null && !res.toUpperCase().contains("ERROR")) {
                     if (diptychState == 1) {
                         final String gradedLeft = new File(Filepaths.getGradedDir(), diptychLeftFilename).getAbsolutePath();
                         new Thread(new Runnable() {
