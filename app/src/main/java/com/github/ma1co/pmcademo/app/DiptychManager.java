@@ -35,70 +35,40 @@ public class DiptychManager {
 
     public void setEnabled(boolean enabled) {
         this.isEnabled = enabled;
-        if (!enabled) {
-            reset();
-        }
+        if (!enabled) reset();
         setVisibility(enabled);
     }
 
-    public boolean isEnabled() {
-        return isEnabled;
-    }
+    public boolean isEnabled() { return isEnabled; }
 
     public void setVisibility(boolean visible) {
-        if (overlayView != null) {
-            overlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
-        }
+        if (overlayView != null) overlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
     public void reset() {
         state = 0;
         leftFilename = null;
         rightFilename = null;
-        if (overlayView != null) {
-            overlayView.setState(0);
-        }
+        if (overlayView != null) overlayView.setState(0);
     }
 
-    public int getState() {
-        return state;
-    }
-
-    public void setThumbOnLeft(boolean left) {
-        if (overlayView != null) {
-            overlayView.setThumbOnLeft(left);
-        }
-    }
-
-    public boolean isThumbOnLeft() {
-        return overlayView != null && overlayView.isThumbOnLeft();
-    }
-
-    public String getLeftFilename() {
-        return leftFilename;
-    }
-
-    public String getRightFilename() {
-        return rightFilename;
-    }
+    public int getState() { return state; }
+    public void setThumbOnLeft(boolean left) { if (overlayView != null) overlayView.setThumbOnLeft(left); }
+    public boolean isThumbOnLeft() { return overlayView != null && overlayView.isThumbOnLeft(); }
+    public String getLeftFilename() { return leftFilename; }
+    public String getRightFilename() { return rightFilename; }
 
     public boolean interceptNewFile(String filename, final String originalPath) {
         if (!isEnabled) return false;
-        
         if (state == 0) {
             leftFilename = filename;
             state = 1;
-            
-            // Instantly decode thumbnail from original file to prevent clunky UI wait!
+            // INSTANT PREVIEW: Decode from original un-graded photo immediately
             new Thread(new Runnable() {
                 public void run() {
                     final Bitmap thumb = getDiptychThumbnail(originalPath);
                     activity.runOnUiThread(new Runnable() {
                         public void run() {
-                            if (tvTopStatus != null) {
-                                tvTopStatus.setText("SHOT 1 CAPTURED. [L/R] TO SWAP SIDE.");
-                                tvTopStatus.setTextColor(Color.GREEN);
-                            }
                             if (overlayView != null) {
                                 overlayView.setThumbnail(thumb);
                                 overlayView.setState(1);
@@ -118,10 +88,14 @@ public class DiptychManager {
     }
 
     public void processFirstShot(final String gradedPath) {
-        // Thumbnail is now handled instantly by interceptNewFile
+        // Unlock shutter after grading is done
         activity.runOnUiThread(new Runnable() {
             public void run() {
                 activity.setProcessing(false);
+                if (tvTopStatus != null) {
+                    tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
+                    tvTopStatus.setTextColor(Color.GREEN);
+                }
                 activity.updateMainHUD();
             }
         });
@@ -152,102 +126,70 @@ public class DiptychManager {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = 8;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            opts.inPurgeable = true;
-            opts.inInputShareable = true;
             return BitmapFactory.decodeFile(path, opts);
-        } catch (Throwable t) {
-            return null;
-        }
+        } catch (Throwable t) { return null; }
     }
 
     private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft) {
         try {
-            System.gc(); // Force memory cleanup after heavy C++ pass
-            String pathL = firstShotLeft ? leftPath : rightPath;
-            String pathR = firstShotLeft ? rightPath : leftPath;
-
+            System.gc();
+            // 1/4 SCALE STITCH (6MP): High quality, fits safely in 24MB RAM
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            opts.inPurgeable = true;
-            opts.inInputShareable = true;
-            // PREVENT OOM on Sony Dalvik VM!
-            // Decode at 1/8th scale (approx 750px wide halves) for 1500px total width
-            opts.inSampleSize = 8; 
+            opts.inSampleSize = 4; 
 
-            BitmapRegionDecoder decoderL = BitmapRegionDecoder.newInstance(pathL, false);
-            BitmapRegionDecoder decoderR = BitmapRegionDecoder.newInstance(pathR, false);
-            if (decoderL == null || decoderR == null) throw new Exception("Failed to initialize Region Decoders.");
+            BitmapRegionDecoder decoder1 = BitmapRegionDecoder.newInstance(leftPath, false);
+            BitmapRegionDecoder decoder2 = BitmapRegionDecoder.newInstance(rightPath, false);
+            if (decoder1 == null || decoder2 == null) throw new Exception("Decoders failed");
 
-            // Get original dimensions
-            int origLW = decoderL.getWidth();
-            int origLH = decoderL.getHeight();
-            int origLMid = origLW / 2;
+            int w1 = decoder1.getWidth(); int h1 = decoder1.getHeight();
+            int w2 = decoder2.getWidth(); int h2 = decoder2.getHeight();
 
-            int origRW = decoderR.getWidth();
-            int origRH = decoderR.getHeight();
-            int origRMid = origRW / 2;
+            int sw1 = w1 / 4; int sh1 = h1 / 4;
+            int sw2 = w2 / 4; int sh2 = h2 / 4;
+            int mid1 = sw1 / 2;
 
-            // Calculate scaled down dimensions (since inSampleSize = 8)
-            int scaledLW = origLW / 8;
-            int scaledLH = origLH / 8;
-            int scaledLMid = origLMid / 8;
-
-            int scaledRW = origRW / 8;
-            int scaledRH = origRH / 8;
-            int scaledRMid = origRMid / 8;
-
-            int finalW = scaledLMid + (scaledRW - scaledRMid);
-            int finalH = Math.min(scaledLH, scaledRH);
+            int finalW = mid1 + (sw2 - (sw2 / 2));
+            int finalH = Math.min(sh1, sh2);
 
             Bitmap composite = Bitmap.createBitmap(finalW, finalH, Bitmap.Config.RGB_565);
             Canvas canvas = new Canvas(composite);
 
-            // Region is specified in ORIGINAL image coordinates
-            Rect srcL;
-            Rect srcR;
-            if (firstShotLeft) {
-                srcL = new Rect(0, 0, origLMid, origLH); // LEFT half of 1st shot
-                srcR = new Rect(origRMid, 0, origRW, origRH); // RIGHT half of 2nd shot
-            } else {
-                srcR = new Rect(0, 0, origRMid, origRH); // LEFT half of 1st shot
-                srcL = new Rect(0, 0, origLMid, origLH); // LEFT half of 2nd shot
+            // Left Crop of 1st shot
+            Rect s1 = new Rect(0, 0, w1 / 2, h1);
+            Bitmap b1 = decoder1.decodeRegion(s1, opts);
+            
+            // Right Crop of 2nd shot
+            Rect s2 = new Rect(w2 / 2, 0, w2, h2);
+            Bitmap b2 = decoder2.decodeRegion(s2, opts);
+
+            if (b1 != null && b2 != null) {
+                if (firstShotLeft) {
+                    canvas.drawBitmap(b1, 0, 0, null);
+                    canvas.drawBitmap(b2, mid1, 0, null);
+                } else {
+                    canvas.drawBitmap(b2, 0, 0, null);
+                    canvas.drawBitmap(b1, mid1, 0, null);
+                }
             }
 
-            Bitmap bmpL = decoderL.decodeRegion(srcL, opts);
-            decoderL.recycle();
-            if (bmpL != null) {
-                canvas.drawBitmap(bmpL, 0, 0, null);
-                bmpL.recycle();
-                bmpL = null;
-            }
+            if (b1 != null) b1.recycle();
+            if (b2 != null) b2.recycle();
+            decoder1.recycle(); decoder2.recycle();
 
-            Bitmap bmpR = decoderR.decodeRegion(srcR, opts);
-            decoderR.recycle();
-            if (bmpR != null) {
-                canvas.drawBitmap(bmpR, scaledLMid, 0, null);
-                bmpR.recycle();
-                bmpR = null;
-            }
+            Paint div = new Paint(); div.setColor(Color.BLACK); div.setStrokeWidth(4);
+            canvas.drawLine(mid1, 0, mid1, finalH, div);
 
-            // Draw analog center divider
-            Paint dividerPaint = new Paint();
-            dividerPaint.setColor(Color.BLACK);
-            dividerPaint.setStrokeWidth(Math.max(4, finalW / 400));
-            canvas.drawLine(scaledLMid, 0, scaledLMid, finalH, dividerPaint);
-
-            File finalOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + new File(rightPath).getName());
-            FileOutputStream out = new FileOutputStream(finalOut);
+            File fOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + new File(rightPath).getName());
+            FileOutputStream out = new FileOutputStream(fOut);
             composite.compress(Bitmap.CompressFormat.JPEG, activity.getPrefJpegQuality(), out);
             out.close();
             composite.recycle();
-            composite = null;
 
-            // Delete the individual graded halves to keep the folder clean
             new File(leftPath).delete();
             new File(rightPath).delete();
 
             activity.runOnUiThread(new Runnable() {
-                @Override
                 public void run() {
                     activity.setProcessing(false);
                     if (tvTopStatus != null) {
@@ -257,14 +199,12 @@ public class DiptychManager {
                     activity.updateMainHUD();
                 }
             });
-        } catch (final Throwable e) {
-            e.printStackTrace();
+        } catch (Throwable e) {
             activity.runOnUiThread(new Runnable() {
-                @Override
                 public void run() {
                     activity.setProcessing(false);
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText("DIPTYCH FAILED (OOM)");
+                        tvTopStatus.setText("DIPTYCH FAILED");
                         tvTopStatus.setTextColor(Color.RED);
                     }
                     activity.updateMainHUD();

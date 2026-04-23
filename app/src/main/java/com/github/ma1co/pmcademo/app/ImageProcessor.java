@@ -79,10 +79,6 @@ public class ImageProcessor {
 
                 File outFile = new File(dir, original.getName());
 
-                FileOutputStream fos = new FileOutputStream(outFile);
-                fos.write(1);
-                fos.close();
-
                 // 0=1/4 RES (4), 1=HALF RES (2), 2=FULL RES (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
@@ -93,6 +89,8 @@ public class ImageProcessor {
                 } else if (scale == 2) {
                     finalJpegQuality = Math.min(90, this.jpegQuality);
                 }
+
+                System.gc(); // Force cleanup before heavy C++ engine starts
 
                 // Texture Intercept
                 if (MenuController.grainTextureFiles.size() > 0 && p.grainSize >= 0 && p.grainSize < MenuController.grainTextureFiles.size()) {
