@@ -69,15 +69,19 @@ inline int grain_strength_v16(int grain, int grainSize) {
     return s_grain;
 }
 
-inline int procedural_grain_v16(int grainSize, uint32_t& seed, int px, int abs_y, int lum, int s_grain) {
+inline int procedural_grain_v16(
+    int grainSize, uint32_t& seed, int px, int abs_y, int lum, int s_grain,
+    int grainOffsetX, int grainOffsetY) {
     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
     int noise;
 
     if (grainSize == 0) {
         noise = raw_noise;
     } else {
-        uint32_t block_x = (grainSize == 1) ? (px >> 1) : ((px * 21845) >> 16);
-        uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+        int grain_x = px + grainOffsetX;
+        int grain_y = abs_y + grainOffsetY;
+        uint32_t block_x = (grainSize == 1) ? (grain_x >> 1) : ((grain_x * 21845) >> 16);
+        uint32_t block_y = (grainSize == 1) ? (grain_y >> 1) : ((grain_y * 21845) >> 16);
 
         uint32_t h = seed + block_x * 1274126177U + block_y * 2654435761U;
         h = (h ^ (h >> 13)) * 374761393U;
@@ -364,7 +368,7 @@ inline void process_row_rgb(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
-    uint32_t& seed,
+    uint32_t& seed, int grainOffsetX, int grainOffsetY,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
     const int* inv_y_lut,
@@ -473,7 +477,7 @@ inline void process_row_rgb(
         }
 
         if (s_grain > 0) {
-            int gv = procedural_grain_v16(grainSize, seed, x, abs_y, targetY, s_grain);
+            int gv = procedural_grain_v16(grainSize, seed, x, abs_y, targetY, s_grain, grainOffsetX, grainOffsetY);
             outR += gv; outG += gv; outB += gv;
         }
 
@@ -489,7 +493,7 @@ inline void process_row_yuv(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
-    uint32_t& seed,
+    uint32_t& seed, int grainOffsetX, int grainOffsetY,
     const uint8_t* rolloff_lut,
     const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
@@ -571,7 +575,7 @@ inline void process_row_yuv(
         }
 
         if (s_grain > 0) {
-            outY += procedural_grain_v16(grainSize, seed, x, abs_y, outY, s_grain);
+            outY += procedural_grain_v16(grainSize, seed, x, abs_y, outY, s_grain, grainOffsetX, grainOffsetY);
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);

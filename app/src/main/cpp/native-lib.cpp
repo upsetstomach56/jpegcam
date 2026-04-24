@@ -150,7 +150,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long cy_center = cd.output_height / 2;
     long long vig_coef = get_vig_coef(vignette, cx * cx + cy_center * cy_center);
     uint32_t grain_seed = (uint32_t)(st & 0xFFFFFFFF);
+    for (const char* p = ifn; *p; ++p) grain_seed = (grain_seed * 16777619U) ^ (uint8_t)(*p);
     if (grain_seed == 0) grain_seed = 98765;
+    uint32_t grain_layout_seed = grain_seed ^ 0x9E3779B9U;
+    int grain_offset_x = (int)(fast_rand(&grain_layout_seed) & 4095);
+    int grain_offset_y = (int)(fast_rand(&grain_layout_seed) & 4095);
 
     int pr = 0; while(pr < (int)cd.output_height){
         int rtp = std::min(CHK, (int)cd.output_height-pr);
@@ -169,13 +173,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                 if (use_rgb) {
                     process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, grain_seed, opac_m, map, nativeLut.data(),
+                        grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, opac_m, map, nativeLut.data(),
                         nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
                         inv_y);
                 } else {
                     process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, grain_seed, roll, inv_y);
+                        grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, roll, inv_y);
                 }
             }
         }
