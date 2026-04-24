@@ -22,6 +22,19 @@ int nativeLutSize = 0;
 std::vector<uint8_t> nativeGrainTexture;
 std::string nativeLastTiming;
 
+static uint16_t yRatioLut[256 * 256];
+static bool yRatioLutReady = false;
+
+static void ensureYRatioLut() {
+    if (yRatioLutReady) return;
+    for (int outY = 0; outY < 256; outY++) {
+        for (int oldY = 0; oldY < 256; oldY++) {
+            yRatioLut[(outY << 8) + oldY] = (uint16_t)((outY * 256) / (oldY == 0 ? 1 : oldY));
+        }
+    }
+    yRatioLutReady = true;
+}
+
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
@@ -66,6 +79,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     jint bloom, jint jpegQuality, jboolean applyCrop, jint numCores) {
 
     nativeLastTiming = "native_status=started";
+    ensureYRatioLut();
     long long st = get_time_ms(); const char *ifn = env->GetStringUTFChars(inPath, NULL); const char *ofn = env->GetStringUTFChars(outPath, NULL);
     FILE *inf = fopen(ifn, "rb"), *ouf = fopen(ofn, "wb");
     if(!inf||!ouf){ nativeLastTiming = "native_status=open_failed"; if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
@@ -126,10 +140,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     int map[256]; for(int i=0; i<256; i++) map[i]=(i*(nativeLutSize-1)*128)/255;
     uint8_t roll[256]; generate_rolloff_lut(roll, rollOff);
-    int grainScale = grain_resolution_scale256(scaleDenom);
-
-    int inv_y[256];
-    for (int i = 0; i < 256; i++) inv_y[i] = 65536 / (i == 0 ? 1 : i);
+    int grainScale = 256;
 
     int ws_s = cd.output_width * sizeof(int);
     int* work_0 = NULL; int* work_1 = NULL; int* work_2 = NULL; int* work_h = NULL; int* h_line = NULL;
@@ -154,11 +165,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long cy_center = cd.output_height / 2;
     long long vig_coef = get_vig_coef(vignette, cx * cx + cy_center * cy_center);
     uint32_t grain_seed = (uint32_t)(st & 0xFFFFFFFF);
-    for (const char* p = ifn; *p; ++p) grain_seed = (grain_seed * 16777619U) ^ (uint8_t)(*p);
     if (grain_seed == 0) grain_seed = 98765;
-    uint32_t grain_layout_seed = grain_seed ^ 0x9E3779B9U;
-    int grain_offset_x = (int)(fast_rand(&grain_layout_seed) & 4095);
-    int grain_offset_y = (int)(fast_rand(&grain_layout_seed) & 4095);
 
     JSAMPROW rpx[1];
     long long t_preload_done = get_time_ms();
@@ -174,13 +181,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                 if (use_rgb) {
                     process_row_rgb(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, opac_m, map, nativeLut.data(),
+                        grain, grainSize, scaleDenom, grain_seed, opac_m, map, nativeLut.data(),
                         nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                        inv_y);
+                        yRatioLut);
                 } else {
                     process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, roll, inv_y);
+                        grain, grainSize, scaleDenom, grain_seed, roll, yRatioLut);
                 }
                 jpeg_write_scanlines(&cc, rpx, 1);
             }
@@ -205,13 +212,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                     if (use_rgb) {
                         process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                            grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, opac_m, map, nativeLut.data(),
+                            grain, grainSize, scaleDenom, grain_seed, opac_m, map, nativeLut.data(),
                             nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                            inv_y);
+                            yRatioLut);
                     } else {
                         process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                            grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, roll, inv_y);
+                            grain, grainSize, scaleDenom, grain_seed, roll, yRatioLut);
                     }
                 }
             }

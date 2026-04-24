@@ -63,25 +63,22 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 inline int grain_strength_v16(int grain, int grainSize) {
-    int s_grain = grain * 10;
+    int s_grain = grain * 20;
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
     return s_grain;
 }
 
 inline int procedural_grain_v16(
-    int grainSize, uint32_t& seed, int px, int abs_y, int lum, int s_grain,
-    int grainOffsetX, int grainOffsetY) {
+    int grainSize, uint32_t& seed, int px, int abs_y, int lum, int s_grain) {
     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
     int noise;
 
     if (grainSize == 0) {
         noise = raw_noise;
     } else {
-        int grain_x = px + grainOffsetX;
-        int grain_y = abs_y + grainOffsetY;
-        uint32_t block_x = (grainSize == 1) ? (grain_x >> 1) : ((grain_x * 21845) >> 16);
-        uint32_t block_y = (grainSize == 1) ? (grain_y >> 1) : ((grain_y * 21845) >> 16);
+        uint32_t block_x = (grainSize == 1) ? (px >> 1) : ((px * 21845) >> 16);
+        uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
 
         uint32_t h = seed + block_x * 1274126177U + block_y * 2654435761U;
         h = (h ^ (h >> 13)) * 374761393U;
@@ -352,14 +349,6 @@ inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
     return (row[i] * 77 + row[i + 1] * 150 + row[i + 2] * 29) >> 8;
 }
 
-inline int grain_resolution_scale256(int scaleDenom) {
-    switch (scaleDenom) {
-        case 2: return 64;
-        case 4: return 32;
-        default: return 256;
-    }
-}
-
 // ==========================================
 // PATH A: RGB + LUT + ANALOG PHYSICS
 // ==========================================
@@ -368,19 +357,19 @@ inline void process_row_rgb(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
-    uint32_t& seed, int grainOffsetX, int grainOffsetY,
+    uint32_t& seed,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
-    const int* inv_y_lut,
+    const uint16_t* y_ratio_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
+    (void)scaleDenom;
     int s_roll   = rollOff * 20;
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     int s_grain = grain_strength_v16(grain, grainSize);
-    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -459,7 +448,7 @@ inline void process_row_rgb(
 
         if (targetY < 8) targetY = 8;
         if (targetY != currentY) {
-            int r256 = (targetY * inv_y_lut[currentY]) >> 8;
+            int r256 = y_ratio_lut[(targetY << 8) + currentY];
             outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
         }
 
@@ -478,7 +467,7 @@ inline void process_row_rgb(
         }
 
         if (s_grain > 0) {
-            int gv = procedural_grain_v16(grainSize, seed, x, abs_y, targetY, s_grain, grainOffsetX, grainOffsetY);
+            int gv = procedural_grain_v16(grainSize, seed, x, abs_y, targetY, s_grain);
             outR += gv; outG += gv; outB += gv;
         }
 
@@ -494,18 +483,18 @@ inline void process_row_yuv(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
-    uint32_t& seed, int grainOffsetX, int grainOffsetY,
+    uint32_t& seed,
     const uint8_t* rolloff_lut,
-    const int* inv_y_lut,
+    const uint16_t* y_ratio_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
+    (void)scaleDenom;
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     
     int s_grain = grain_strength_v16(grain, grainSize);
-    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -572,12 +561,12 @@ inline void process_row_yuv(
         }
 
         if (oldY != outY) {
-            int r256 = (outY * inv_y_lut[oldY]) >> 8;
+            int r256 = y_ratio_lut[(outY << 8) + oldY];
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
 
         if (s_grain > 0) {
-            outY += procedural_grain_v16(grainSize, seed, x, abs_y, outY, s_grain, grainOffsetX, grainOffsetY);
+            outY += procedural_grain_v16(grainSize, seed, x, abs_y, outY, s_grain);
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);
