@@ -299,6 +299,11 @@ inline int grain_amount_mask(int y) {
     return 88 - (((y - 196) * 563) >> 8);
 }
 
+inline int grain_texture_mix(int grain) {
+    int mix = grain * 26;
+    return mix > 128 ? 128 : mix;
+}
+
 inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
     if (x < 0) x = 0;
     if (x >= width) x = width - 1;
@@ -466,8 +471,9 @@ inline void process_row_rgb(
                     tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
                 }
 
-                int blendedR = blend_overlay(outR, tr); int blendedG = blend_overlay(outG, tg); int blendedB = blend_overlay(outB, tb);
-                int mix = (((grain >= 5) ? 256 : (grain * 51)) * env) >> 8;
+                int texY = (tr * 77 + tg * 150 + tb * 29) >> 8;
+                int blendedR = blend_overlay(outR, texY); int blendedG = blend_overlay(outG, texY); int blendedB = blend_overlay(outB, texY);
+                int mix = (grain_texture_mix(grain) * env) >> 8;
                 outR += (((blendedR - outR) * mix) >> 8); outG += (((blendedG - outG) * mix) >> 8); outB += (((blendedB - outB) * mix) >> 8);
             }
         }
@@ -602,12 +608,10 @@ inline void process_row_yuv(
                     tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
                 }
                 
-                int r = outY + ((cr * 359) >> 8), g = outY - ((cb * 88 + cr * 183) >> 8), b = outY + ((cb * 454) >> 8);
-                int blendedR = blend_overlay(r, tr); int blendedG = blend_overlay(g, tg); int blendedB = blend_overlay(b, tb);
-                int mix = (((grain >= 5) ? 256 : (grain * 51)) * env) >> 8;
-                r += (((blendedR - r) * mix) >> 8); g += (((blendedG - g) * mix) >> 8); b += (((blendedB - b) * mix) >> 8);
-                outY = (r * 77 + g * 150 + b * 29) >> 8;
-                cb = ((-38 * r - 74 * g + 112 * b) >> 8); cr = ((112 * r - 94 * g - 18 * b) >> 8);
+                int texY = (tr * 77 + tg * 150 + tb * 29) >> 8;
+                int blendedY = blend_overlay(outY, texY);
+                int mix = (grain_texture_mix(grain) * env) >> 8;
+                outY += (((blendedY - outY) * mix) >> 8);
             }
         }
 

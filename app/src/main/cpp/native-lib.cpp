@@ -73,8 +73,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     for (int i = 0; i < 16; i++) jpeg_save_markers(&cd, JPEG_APP0 + i, 0xFFFF);
     jpeg_save_markers(&cd, JPEG_COM, 0xFFFF);
 
+    bool use_rgb = (nativeLutSize > 0 && opacity > 0);
     jpeg_read_header(&cd, TRUE);
-    cd.scale_denom = scaleDenom; cd.out_color_space = JCS_RGB; jpeg_start_decompress(&cd);
+    cd.scale_denom = scaleDenom; cd.out_color_space = use_rgb ? JCS_RGB : JCS_YCbCr; jpeg_start_decompress(&cd);
     long long t_decode_start = get_time_ms();
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
@@ -82,7 +83,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     jpeg_create_compress(&cc); jpeg_stdio_dest(&cc, ouf);
     
     int fh = cd.output_height, sk = 0; if(applyCrop){ fh=(int)(cd.output_width/2.71f); sk=(cd.output_height-fh)/2; }
-    cc.image_width = cd.output_width; cc.image_height = fh; cc.input_components = 3; cc.in_color_space = JCS_RGB;
+    cc.image_width = cd.output_width; cc.image_height = fh; cc.input_components = 3; cc.in_color_space = use_rgb ? JCS_RGB : JCS_YCbCr;
     jpeg_set_defaults(&cc); jpeg_set_quality(&cc, jpegQuality, TRUE); 
     
     // --- COPY ALL MARKERS BACK (Fixes Review Error) ---
@@ -146,7 +147,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
     long long t_preload_done = get_time_ms();
 
-    bool use_rgb = (nativeLutSize > 0 && opacity > 0);
     int opac_m = (opacity * 256) / 100;
     long long cx = cd.output_width / 2;
     long long cy_center = cd.output_height / 2;
