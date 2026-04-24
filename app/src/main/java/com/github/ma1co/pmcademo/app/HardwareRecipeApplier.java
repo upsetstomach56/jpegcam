@@ -125,10 +125,10 @@ public class HardwareRecipeApplier {
         // ----------------------------------------------------------------
         p = c.getParameters();
 
-        // v1.6 did not map recipe Kelvin strings like "5500K"; keep them on auto.
         String wb     = "auto";
         String profWb = prof.whiteBalance != null ? prof.whiteBalance : "Auto";
-        if      ("DAY".equals(profWb))    wb = "daylight";
+        if      (profWb.endsWith("K"))    { wb = "color-temp"; p.set("color-temperture-white-balance", profWb.replace("K", "")); }
+        else if ("DAY".equals(profWb))    wb = "daylight";
         else if ("SHD".equals(profWb))    wb = "shade";
         else if ("CLD".equals(profWb))    wb = "cloudy-daylight";
         else if ("INC".equals(profWb))    wb = "incandescent";

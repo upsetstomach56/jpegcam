@@ -78,6 +78,10 @@ public class ImageProcessor {
                 + "\tcrop=" + applyCrop
                 + "\tdiptych=" + isDiptych
                 + "\tcores=" + numCores
+                + "\twhite_balance=" + cleanLogValue(p.whiteBalance)
+                + "\twb_shift=" + p.wbShift
+                + "\twb_shift_gm=" + p.wbShiftGM
+                + "\tcolor_mode=" + cleanLogValue(p.colorMode)
                 + "\topacity=" + p.opacity
                 + "\tgrain=" + p.grain
                 + "\tgrain_size=" + finalGrainSize
