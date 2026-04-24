@@ -307,6 +307,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", true);
         prefJpegQuality = prefs.getInt("jpegQuality", 95);
+        boolean prefShowDiptych = prefs.getBoolean("diptychEnabled", false);
         
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
@@ -342,6 +343,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         buildUI(rootLayout);
         setContentView(rootLayout);
+        if (prefShowDiptych && diptychManager != null) diptychManager.setEnabled(true);
         setupEngines();
     }
 
@@ -833,6 +835,16 @@ public void onEnterPressed() {
         return true; // We handled the action in our app, safely swallow the release!
     }
     
+    private void saveAppPreferences() {
+        SharedPreferences.Editor ed = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
+        ed.putBoolean("focusMeter",    prefShowFocusMeter);
+        ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
+        ed.putBoolean("gridLines",     prefShowGridLines);
+        ed.putInt("jpegQuality",       prefJpegQuality);
+        ed.putBoolean("diptychEnabled", isPrefDiptych());
+        ed.apply();
+    }
+
     @Override
     public boolean onCustomButtonPressed(String keyId) {
         if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
@@ -860,14 +872,24 @@ public void onEnterPressed() {
             return true; 
         } else if (action == 3) { // TOGGLE FOCUS METER
             setPrefFocusMeter(!isPrefFocusMeter());
+            saveAppPreferences();
             updateMainHUD();
             return true;
-        } else if (action == 4) { // TOGGLE CINEMA MATTES
-            setPrefCinemaMattes(!isPrefCinemaMattes());
+        } else if (action == 4) { // CYCLE CREATIVE MODES
+            int mode = 0;
+            if (isPrefCinemaMattes()) mode = 1;
+            else if (isPrefDiptych()) mode = 2;
+            
+            mode = (mode + 1) % 3;
+            
+            setPrefCinemaMattes(mode == 1);
+            setPrefDiptych(mode == 2);
+            saveAppPreferences();
             updateMainHUD();
             return true;
         } else if (action == 5) { // TOGGLE GRID LINES
             setPrefGridLines(!isPrefGridLines());
+            saveAppPreferences();
             updateMainHUD();
             return true;
         }
@@ -1889,12 +1911,7 @@ public void onEnterPressed() {
 
     @Override public void onMenuClosed() {
         recipeManager.savePreferences();
-        SharedPreferences.Editor ed = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
-        ed.putBoolean("focusMeter",    prefShowFocusMeter);
-        ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
-        ed.putBoolean("gridLines",     prefShowGridLines);
-        ed.putInt("jpegQuality",       prefJpegQuality);
-        ed.apply();
+        saveAppPreferences();
         triggerLutPreload();
         applyHardwareRecipe();
         syncHardwareState();

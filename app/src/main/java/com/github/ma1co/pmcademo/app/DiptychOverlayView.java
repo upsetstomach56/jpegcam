@@ -41,17 +41,27 @@ public class DiptychOverlayView extends View {
     public void setState(int state) {
         this.state = state;
         if (state == DiptychManager.STATE_NEED_FIRST) {
-            if (thumbnail != null && !thumbnail.isRecycled()) {
-                thumbnail.recycle();
-            }
-            thumbnail = null;
+            clearThumbnail();
             thumbOnLeft = true;
         }
         invalidate();
     }
 
+    public void clearThumbnail() {
+        Bitmap oldThumb = this.thumbnail;
+        this.thumbnail = null; // Sever UI link immediately
+        if (oldThumb != null && !oldThumb.isRecycled()) {
+            oldThumb.recycle();
+        }
+        invalidate();
+    }
+
     public void setThumbnail(Bitmap thumb) {
+        Bitmap oldThumb = this.thumbnail;
         this.thumbnail = thumb;
+        if (oldThumb != null && !oldThumb.isRecycled()) {
+            oldThumb.recycle();
+        }
         invalidate();
     }
 

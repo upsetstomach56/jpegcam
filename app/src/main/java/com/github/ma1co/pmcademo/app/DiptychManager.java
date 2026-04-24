@@ -107,7 +107,11 @@ public class DiptychManager {
     public void processSecondShot(final String gradedLeftPath, final String gradedRightPath) {
         activity.runOnUiThread(new Runnable() {
             public void run() {
-                if (overlayView != null) overlayView.setState(STATE_STITCHING);
+                if (overlayView != null) {
+                    // Immediately purge the thumbnail to give the C++ stitcher max breathing room
+                    overlayView.clearThumbnail(); 
+                    overlayView.setState(STATE_STITCHING);
+                }
                 if (tvTopStatus != null) {
                     tvTopStatus.setText("STITCHING DIPTYCH...");
                     tvTopStatus.setTextColor(Color.YELLOW);
@@ -118,6 +122,11 @@ public class DiptychManager {
         final boolean firstShotLeft = isThumbOnLeft();
         new Thread(new Runnable() {
             public void run() {
+                try {
+                    // Guarantee the UI thread has time to execute the thumbnail purge before C++ asks for RAM
+                    Thread.sleep(150); 
+                } catch (Exception ignored) {}
+                
                 performDiptychStitch(gradedLeftPath, gradedRightPath, firstShotLeft);
             }
         }).start();

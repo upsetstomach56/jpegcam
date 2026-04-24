@@ -557,11 +557,19 @@ public class MenuController {
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
-            else if (sel == 2) host.setPrefFocusMeter(!host.isPrefFocusMeter());
-            else if (sel == 3) host.setPrefCinemaMattes(!host.isPrefCinemaMattes());
-            else if (sel == 4) host.setPrefDiptych(!host.isPrefDiptych()); // <--- ADDED
-            else if (sel == 5) host.setPrefGridLines(!host.isPrefGridLines());
-            else if (sel == 6) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+            else if (sel == 1) host.setPrefFocusMeter(!host.isPrefFocusMeter());
+            else if (sel == 2) {
+                int mode = 0;
+                if (host.isPrefCinemaMattes()) mode = 1;
+                else if (host.isPrefDiptych()) mode = 2;
+                
+                mode = (mode + dir + 3) % 3;
+                
+                host.setPrefCinemaMattes(mode == 1);
+                host.setPrefDiptych(mode == 2);
+            }
+            else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
+            else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
         } else if (currentPage == 7) {
             if      (sel == 0) rm.setPrefC1(Math.max(0, Math.min(5, rm.getPrefC1() + dir)));
             else if (sel == 1) rm.setPrefC2(Math.max(0, Math.min(5, rm.getPrefC2() + dir)));
@@ -620,10 +628,6 @@ public class MenuController {
         supportContainer.setVisibility(View.GONE);
 
         if (currentPage == 9) { supportContainer.setVisibility(View.VISIBLE); itemCount = 0; return; }
-
-        String scn = "UNKNOWN";
-        Camera cam = host.getCamera();
-        if (cam != null) { try { scn = cam.getParameters().getSceneMode().toUpperCase(); } catch (Exception ignored) {} }
 
         String[] amtLbls  = {"OFF","LOW","MED","HIGH","V.HIGH","MAX"};
         String[] sizeLbls = {"SMALL","MED","LARGE"};
@@ -699,18 +703,21 @@ public class MenuController {
             }
         }
         if (currentPage == 6) {
-            ic = 7; // Increment count from 6 to 7
+            ic = 5; 
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
+            
+            String creativeMode = "OFF";
+            if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
+            else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
+            
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
-            setRow(1, "Base Scene",            scn);
-            setRow(2, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
-            setRow(3, "XPan Crop",             host.isPrefCinemaMattes() ? "ON" : "OFF");
-            setRow(4, "Diptych Mode",          host.isPrefDiptych()      ? "ON" : "OFF"); // <--- ADDED
-            setRow(5, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
-            setRow(6, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
+            setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
+            setRow(2, "Creative Modes",        creativeMode);
+            setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
+            setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
         } else if (currentPage == 7) {
             ic = 5;
-            String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "TOGGLE CINEMA MATTES", "TOGGLE GRID LINES"};
+            String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "CYCLE CREATIVE MODES", "TOGGLE GRID LINES"};
             setRow(0, "Custom 1 (C1)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC1()))]);
             setRow(1, "Custom 2 (C2)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC2()))]);
             setRow(2, "Custom 3 (C3)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC3()))]);

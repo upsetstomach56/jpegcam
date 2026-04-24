@@ -202,11 +202,19 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
         return JNI_FALSE;
     }
 
-    struct jpeg_decompress_struct c1, c2; struct my_error_mgr j1, j2;
+    struct jpeg_decompress_struct c1, c2; 
+    struct my_error_mgr j1, j2;
+    
+    // Bullet-proof initialization so error handlers don't crash on NULL pointers
+    memset(&c1, 0, sizeof(c1));
+    memset(&c2, 0, sizeof(c2));
+    
     c1.err = jpeg_std_error(&j1.pub); j1.pub.error_exit = my_error_exit;
     c2.err = jpeg_std_error(&j2.pub); j2.pub.error_exit = my_error_exit;
     if(setjmp(j1.setjmp_buffer) || setjmp(j2.setjmp_buffer)) {
         LOGD("Diptych jpeg decode setup failed");
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
         fclose(f1); fclose(f2); fclose(fo);
         env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
         return JNI_FALSE;
@@ -215,17 +223,26 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     jpeg_create_decompress(&c1); jpeg_stdio_src(&c1, f1); jpeg_read_header(&c1, TRUE);
     jpeg_create_decompress(&c2); jpeg_stdio_src(&c2, f2); jpeg_read_header(&c2, TRUE);
     
-    // Smart scale: if images are large (full/half-res processed files), decode at 1/2
-    // to prevent OOM. Effects are already baked in by processImageNative before stitching.
-    // Small proxy files (width <= 3000) decode at full scale to preserve quality.
     c1.scale_denom = (c1.image_width > 3000) ? 2 : 1;
     c2.scale_denom = (c2.image_width > 3000) ? 2 : 1;
+    
+    c1.dct_method = JDCT_IFAST; c1.do_fancy_upsampling = FALSE;
+    c2.dct_method = JDCT_IFAST; c2.do_fancy_upsampling = FALSE;
+    
     c1.out_color_space = JCS_RGB; jpeg_start_decompress(&c1);
     c2.out_color_space = JCS_RGB; jpeg_start_decompress(&c2);
     
-    struct jpeg_compress_struct co; struct my_error_mgr jo; co.err = jpeg_std_error(&jo.pub); jo.pub.error_exit = my_error_exit;
+    struct jpeg_compress_struct co; 
+    struct my_error_mgr jo; 
+    memset(&co, 0, sizeof(co));
+    
+    co.err = jpeg_std_error(&jo.pub); jo.pub.error_exit = my_error_exit;
     if(setjmp(jo.setjmp_buffer)) {
         LOGD("Diptych jpeg encode setup failed");
+        if (co.mem) jpeg_destroy_compress(&co);
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
+        fclose(f1); fclose(f2); fclose(fo);
         env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
         return JNI_FALSE;
     }
@@ -248,9 +265,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
         if (row1) free(row1);
         if (row2) free(row2);
         if (combined) free(combined);
-        jpeg_destroy_compress(&co);
-        jpeg_destroy_decompress(&c1);
-        jpeg_destroy_decompress(&c2);
+        if (co.mem) jpeg_destroy_compress(&co);
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
         fclose(f1); fclose(f2); fclose(fo);
         env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
         return JNI_FALSE;
@@ -280,8 +297,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     
     free(row1); free(row2); free(combined);
     jpeg_finish_compress(&co); jpeg_destroy_compress(&co);
-    jpeg_finish_decompress(&c1); jpeg_destroy_decompress(&c1);
-    jpeg_finish_decompress(&c2); jpeg_destroy_decompress(&c2);
+    
+    // Abort decompression immediately without finishing to avoid unread scanline errors
+    jpeg_destroy_decompress(&c1);
+    jpeg_destroy_decompress(&c2);
+    
     LOGD("Diptych saved: %s", po);
     fclose(f1); fclose(f2); fclose(fo);
     env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
