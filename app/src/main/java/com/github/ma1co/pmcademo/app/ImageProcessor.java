@@ -50,11 +50,15 @@ public class ImageProcessor {
 
     private void appendProcessingTiming(File original, File outFile, String result,
                                         long waitMs, long textureMs, long nativeMs, long javaTotalMs,
+                                        long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts,
                                         int qualityIdx, int scale, int finalJpegQuality,
                                         int finalGrainSize, int finalBloom, int numCores,
                                         RTLProfile p, boolean applyCrop, boolean isDiptych,
                                         String nativeTiming) {
         String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
+        long scannerDetectMs = (scannerStartedMs > 0 && detectedMs >= scannerStartedMs) ? detectedMs - scannerStartedMs : -1;
+        long detectToStableMs = (detectedMs > 0 && stableMs >= detectedMs) ? stableMs - detectedMs : -1;
+        long preProcessTotalMs = (scannerStartedMs > 0 && stableMs >= scannerStartedMs) ? stableMs - scannerStartedMs : -1;
         String line = timestamp
                 + "\tresult=" + cleanLogValue(result)
                 + "\tfile=" + cleanLogValue(original.getName())
@@ -62,6 +66,10 @@ public class ImageProcessor {
                 + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
                 + "\tjava_total=" + javaTotalMs
                 + "\twait=" + waitMs
+                + "\tscanner_detect=" + scannerDetectMs
+                + "\tdetect_to_stable=" + detectToStableMs
+                + "\tpre_process_total=" + preProcessTotalMs
+                + "\tscanner_attempts=" + scannerAttempts
                 + "\ttexture=" + textureMs
                 + "\tnative=" + nativeMs
                 + "\tquality_idx=" + qualityIdx
@@ -106,7 +114,14 @@ public class ImageProcessor {
     }
 
     public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p, boolean applyCrop, boolean isDiptych) {
-        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop, isDiptych).execute(originalPath);
+        processJpeg(originalPath, outDirPath, qualityIndex, jpegQuality, p, applyCrop, isDiptych, 0, 0, 0, 0);
+    }
+
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p,
+                            boolean applyCrop, boolean isDiptych,
+                            long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop, isDiptych,
+                scannerStartedMs, detectedMs, stableMs, scannerAttempts).execute(originalPath);
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
@@ -124,14 +139,23 @@ public class ImageProcessor {
         private String outDir;
         private boolean applyCrop; // <-- NEW
         private boolean isDiptych;
+        private long scannerStartedMs;
+        private long detectedMs;
+        private long stableMs;
+        private int scannerAttempts;
 
-        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych) {
+        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych,
+                           long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
             this.qualityIdx  = q;
             this.jpegQuality = jpegQuality;
             this.p           = p;
             this.outDir      = out;
             this.applyCrop   = crop; // <-- NEW
             this.isDiptych   = isDiptych;
+            this.scannerStartedMs = scannerStartedMs;
+            this.detectedMs = detectedMs;
+            this.stableMs = stableMs;
+            this.scannerAttempts = scannerAttempts;
         }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
@@ -143,12 +167,14 @@ public class ImageProcessor {
                 if (!original.exists()) return "ERR";
 
                 long waitStartMs = System.currentTimeMillis();
-                long lastSize = -1; int timeout = 0;
-                while (timeout < 50) {
-                    long currentSize = original.length();
-                    if (currentSize > 0 && currentSize == lastSize) break;
-                    lastSize = currentSize;
-                    Thread.sleep(100); timeout++;
+                if (stableMs <= 0) {
+                    long lastSize = -1; int timeout = 0;
+                    while (timeout < 50) {
+                        long currentSize = original.length();
+                        if (currentSize > 0 && currentSize == lastSize) break;
+                        lastSize = currentSize;
+                        Thread.sleep(100); timeout++;
+                    }
                 }
                 long waitEndMs = System.currentTimeMillis();
 
@@ -203,6 +229,7 @@ public class ImageProcessor {
                 appendProcessingTiming(original, outFile, success ? "SAVED" : "FAILED",
                         waitEndMs - waitStartMs, textureEndMs - textureStartMs,
                         nativeEndMs - nativeStartMs, nativeEndMs - taskStartMs,
+                        scannerStartedMs, detectedMs, stableMs, scannerAttempts,
                         qualityIdx, scale, finalJpegQuality, finalGrainSize, finalBloom,
                         numCores, p, applyCrop, isDiptych, nativeTiming);
                 if (success) {

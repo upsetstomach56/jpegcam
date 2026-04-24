@@ -345,6 +345,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         setContentView(rootLayout);
         if (prefShowDiptych && diptychManager != null) diptychManager.setEnabled(true);
         setupEngines();
+        registerReceiver(sonyCameraReceiver, new IntentFilter("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED"));
     }
 
     private void setupEngines() {
@@ -384,16 +385,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
                         p.bloom != 0);
             }
-            @Override 
-            public void onNewPhotoDetected(final String path) { 
-                processWhenFileReady(path);
+            @Override
+            public void onNewPhotoDetected(final String path, final long scannerStartedMs, final long detectedMs, final int attempts) {
+                processWhenFileReady(path, scannerStartedMs, detectedMs, attempts);
             }
         });
         
         triggerLutPreload();
     }
     
-    private void processWhenFileReady(final String path) {
+    private void processWhenFileReady(final String path, final long scannerStartedMs, final long detectedMs, final int scannerAttempts) {
         // Wrap the diagnostic in our global debug flag
         if (DEBUG_MODE) {
             android.widget.Toast.makeText(this, "File Detected! Waiting for write...", android.widget.Toast.LENGTH_SHORT).show();
@@ -427,18 +428,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
+                    long stableMs = System.currentTimeMillis();
                     // --- DIPTYCH INTERCEPT ---
                     if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true,
+                                scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     } else {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false,
+                                scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     }
                 } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
                     retries[0]++;
-                    uiHandler.postDelayed(this, 300);
+                    uiHandler.postDelayed(this, 100);
                 } else {
                     isProcessing = false;
                     updateMainHUD();
@@ -446,7 +450,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         };
         
-        uiHandler.postDelayed(checker, 200);
+        uiHandler.post(checker);
     }
 
     private void triggerLutPreload() {
