@@ -63,7 +63,7 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 inline int grain_strength_v16(int grain, int grainSize) {
-    int s_grain = grain * 20;
+    int s_grain = grain * 10;
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
     return s_grain;
