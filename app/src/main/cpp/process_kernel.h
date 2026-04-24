@@ -58,6 +58,43 @@ inline void generate_rolloff_lut(uint8_t* lut, int rollOff) {
     }
 }
 
+inline uint32_t fast_rand(uint32_t* state) {
+    uint32_t x = *state; x ^= x << 13; x ^= x >> 17; x ^= x << 5; *state = x; return x;
+}
+
+inline int grain_strength_v16(int grain, int grainSize) {
+    int s_grain = grain * 20;
+    if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
+    if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
+    return s_grain;
+}
+
+inline int procedural_grain_v16(int grainSize, uint32_t& seed, int px, int abs_y, int lum, int s_grain) {
+    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+    int noise;
+
+    if (grainSize == 0) {
+        noise = raw_noise;
+    } else {
+        uint32_t block_x = (grainSize == 1) ? (px >> 1) : ((px * 21845) >> 16);
+        uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+
+        uint32_t h = seed + block_x * 1274126177U + block_y * 2654435761U;
+        h = (h ^ (h >> 13)) * 374761393U;
+        int block_noise = (h & 0xFF) - 128;
+
+        if (grainSize == 1) {
+            noise = (raw_noise + block_noise) >> 1;
+        } else {
+            noise = (raw_noise + block_noise * 3) >> 2;
+        }
+    }
+
+    int mask = (lum < 128) ? lum : 255 - lum;
+    if (lum < 64) mask = (mask * lum) >> 6;
+    return (noise * mask * s_grain) >> 15;
+}
+
 // OPTICAL BLOOM & TRUE HALATION ENGINE V5 (PHYSICALLY BASED)
 // ==========================================
 inline void apply_bloom_halation(
@@ -327,6 +364,7 @@ inline void process_row_rgb(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
+    uint32_t& seed,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
     const int* inv_y_lut,
@@ -337,19 +375,11 @@ inline void process_row_rgb(
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
-    int s_grain = (grain * 40) + (grain * grain * 12); 
-    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
+    int s_grain = grain_strength_v16(grain, grainSize);
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
-
-    int prevRawY = row_luma_rgb_at(row, width, 0);
-    int currRawY = prevRawY;
-    int nextRawY = row_luma_rgb_at(row, width, 1);
-
-    // Constant row grain calcs
-    int oy = abs_y + t_off_y;
 
     for (int x = 0; x < width; x++) {
         int i = x * 3;
@@ -442,47 +472,12 @@ inline void process_row_rgb(
             d_sq_step += 2;
         }
 
-        // Texture Overlay
-        if (externalGrainTexture != NULL && grain > 0) {
-            int env = grain_amount_mask(targetY);
-            if (env > 0) {
-                bool is_1024 = is_1024_grain;
-                int tr, tg, tb;
-                int ox = x + t_off_x;
-
-                if (scaleDenom == 1) {
-                    if (is_1024) {
-                        int tx = ox & 1023, ty = oy & 1023;
-                        if (((ox >> 10) ^ (oy >> 10)) & 1) tx = 1023 - tx;
-                        if ((((ox >> 10) * 3) ^ (oy >> 10)) & 2) ty = 1023 - ty;
-                        int tex_idx = (ty * 1024 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx]; tg = externalGrainTexture[tex_idx + 1]; tb = externalGrainTexture[tex_idx + 2];
-                    } else {
-                        int tx = ox & 511, ty = oy & 511;
-                        if (((ox >> 9) ^ (oy >> 9)) & 1) tx = 511 - tx;
-                        if ((((ox >> 9) * 3) ^ (oy >> 9)) & 2) ty = 511 - ty;
-                        int tex_idx = (ty * 512 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx]; tg = externalGrainTexture[tex_idx + 1]; tb = externalGrainTexture[tex_idx + 2];
-                    }
-                } else {
-                    int gRGB[3];
-                    if (is_1024) sample_tex_bilinear_1024(externalGrainTexture, (ox * scaleDenom) << 8, (oy * scaleDenom) << 8, gRGB);
-                    else sample_tex_bilinear_512_xor(externalGrainTexture, (ox * scaleDenom) << 8, (oy * scaleDenom) << 8, gRGB);
-                    tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
-                }
-
-                int texY = (tr * 77 + tg * 150 + tb * 29) >> 8;
-                int blendedR = blend_overlay(outR, texY); int blendedG = blend_overlay(outG, texY); int blendedB = blend_overlay(outB, texY);
-                int mix = (grain_texture_mix(grain) * env) >> 8;
-                outR += (((blendedR - outR) * mix) >> 8); outG += (((blendedG - outG) * mix) >> 8); outB += (((blendedB - outB) * mix) >> 8);
-            }
+        if (s_grain > 0) {
+            int gv = procedural_grain_v16(grainSize, seed, x, abs_y, targetY, s_grain);
+            outR += gv; outG += gv; outB += gv;
         }
 
         row[i] = (uint8_t)CLAMP(outR); row[i+1] = (uint8_t)CLAMP(outG); row[i+2] = (uint8_t)CLAMP(outB);
-
-        prevRawY = currRawY;
-        currRawY = nextRawY;
-        nextRawY = row_luma_rgb_at(row, width, x + 2);
     }
 }
 
@@ -494,6 +489,7 @@ inline void process_row_yuv(
     int shadowToe, int rollOff, int colorChrome, int chromeBlue,
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
+    uint32_t& seed,
     const uint8_t* rolloff_lut,
     const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
@@ -503,9 +499,7 @@ inline void process_row_yuv(
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     
-    // Exponential math: Slider 1 is subtle, Slider 5 is massive cinematic noise
-    int s_grain = (grain * 40) + (grain * grain * 12); 
-    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
+    int s_grain = grain_strength_v16(grain, grainSize);
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -514,9 +508,6 @@ inline void process_row_yuv(
     int prevInputY = row[0];
     int currInputY = row[0];
     int nextInputY = (width > 1) ? row[3] : row[0];
-
-    // Constant row grain calcs
-    int oy = abs_y + t_off_y;
 
     for(int x = 0; x < width; x++) {
         int i = x * 3;
@@ -579,40 +570,8 @@ inline void process_row_yuv(
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
 
-        // Texture Overlay
-        if (externalGrainTexture != NULL && grain > 0) {
-            int env = grain_amount_mask(outY);
-            if (env > 0) {
-                bool is_1024 = is_1024_grain;
-                int tr, tg, tb;
-                int ox = x + t_off_x;
-
-                if (scaleDenom == 1) {
-                    if (is_1024) {
-                        int tx = ox & 1023, ty = oy & 1023;
-                        if (((ox >> 10) ^ (oy >> 10)) & 1) tx = 1023 - tx;
-                        if ((((ox >> 10) * 3) ^ (oy >> 10)) & 2) ty = 1023 - ty;
-                        int tex_idx = (ty * 1024 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx]; tg = externalGrainTexture[tex_idx + 1]; tb = externalGrainTexture[tex_idx + 2];
-                    } else {
-                        int tx = ox & 511, ty = oy & 511;
-                        if (((ox >> 9) ^ (oy >> 9)) & 1) tx = 511 - tx;
-                        if ((((ox >> 9) * 3) ^ (oy >> 9)) & 2) ty = 511 - ty;
-                        int tex_idx = (ty * 512 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx]; tg = externalGrainTexture[tex_idx + 1]; tb = externalGrainTexture[tex_idx + 2];
-                    }
-                } else {
-                    int gRGB[3];
-                    if (is_1024) sample_tex_bilinear_1024(externalGrainTexture, (ox * scaleDenom) << 8, (oy * scaleDenom) << 8, gRGB);
-                    else sample_tex_bilinear_512_xor(externalGrainTexture, (ox * scaleDenom) << 8, (oy * scaleDenom) << 8, gRGB);
-                    tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
-                }
-                
-                int texY = (tr * 77 + tg * 150 + tb * 29) >> 8;
-                int blendedY = blend_overlay(outY, texY);
-                int mix = (grain_texture_mix(grain) * env) >> 8;
-                outY += (((blendedY - outY) * mix) >> 8);
-            }
+        if (s_grain > 0) {
+            outY += procedural_grain_v16(grainSize, seed, x, abs_y, outY, s_grain);
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);

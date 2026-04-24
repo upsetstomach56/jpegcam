@@ -93,13 +93,8 @@ public class ImageProcessor {
                     finalJpegQuality = Math.min(90, this.jpegQuality);
                 }
 
-                // Texture Intercept
                 long textureStartMs = System.currentTimeMillis();
-                if (MenuController.grainTextureFiles.size() > 0 && p.grainSize >= 0 && p.grainSize < MenuController.grainTextureFiles.size()) {
-                    File texFile = MenuController.grainTextureFiles.get(p.grainSize);
-                    mEngine.loadGrainTexture(texFile); // Load into C++ Global RAM
-                }
-                long textureEndMs = System.currentTimeMillis();
+                long textureEndMs = textureStartMs;
                 
                 // --- DIPTYCH COMPENSATOR ---
                 // Safely steps down physical effects to account for the smaller 6MP canvas

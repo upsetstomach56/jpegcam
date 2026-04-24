@@ -140,8 +140,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         }
     }
 
-    const uint8_t* tex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
-    bool is1k = nativeGrainTexture.size() > 1000000;
     JSAMPROW rpx[1];
     if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
     for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
@@ -151,11 +149,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long cx = cd.output_width / 2;
     long long cy_center = cd.output_height / 2;
     long long vig_coef = get_vig_coef(vignette, cx * cx + cy_center * cy_center);
-    
-    // Seed grain randomization with a fixed but distinct value per image
-    long long current_time = get_time_ms();
-    int tx_base = (int)(current_time % 1021);
-    int ty_base = (int)((current_time / 13) % 1021);
+    uint32_t grain_seed = (uint32_t)(st & 0xFFFFFFFF);
+    if (grain_seed == 0) grain_seed = 98765;
 
     int pr = 0; while(pr < (int)cd.output_height){
         int rtp = std::min(CHK, (int)cd.output_height-pr);
@@ -174,13 +169,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                 if (use_rgb) {
                     process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, opac_m, map, nativeLut.data(),
+                        grain, grainSize, scaleDenom, grain_seed, opac_m, map, nativeLut.data(),
                         nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                        inv_y, tex, is1k, tx_base, ty_base);
+                        inv_y);
                 } else {
                     process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, roll, inv_y, tex, is1k, tx_base, ty_base);
+                        grain, grainSize, scaleDenom, grain_seed, roll, inv_y);
                 }
             }
         }
