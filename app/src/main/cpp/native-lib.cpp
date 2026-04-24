@@ -63,6 +63,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long st = get_time_ms(); const char *ifn = env->GetStringUTFChars(inPath, NULL); const char *ofn = env->GetStringUTFChars(outPath, NULL);
     FILE *inf = fopen(ifn, "rb"), *ouf = fopen(ofn, "wb");
     if(!inf||!ouf){ if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    long long t_open = get_time_ms();
 
     struct jpeg_decompress_struct cd; struct my_error_mgr jd; cd.err = jpeg_std_error(&jd.pub); jd.pub.error_exit = my_error_exit;
     if(setjmp(jd.setjmp_buffer)){ jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
@@ -74,6 +75,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     jpeg_read_header(&cd, TRUE);
     cd.scale_denom = scaleDenom; cd.out_color_space = JCS_RGB; jpeg_start_decompress(&cd);
+    long long t_decode_start = get_time_ms();
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
     if(setjmp(jc.setjmp_buffer)){ jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
@@ -90,6 +92,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         jpeg_write_marker(&cc, mark->marker, mark->data, mark->data_length);
         mark = mark->next;
     }
+    long long t_compress_start = get_time_ms();
 
     int rs = cd.output_width*3;
     
@@ -141,6 +144,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     JSAMPROW rpx[1];
     if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
     for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
+    long long t_preload_done = get_time_ms();
 
     bool use_rgb = (nativeLutSize > 0 && opacity > 0);
     int opac_m = (opacity * 256) / 100;
@@ -185,9 +189,18 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         for(int i=0; i<rtp; i++){ int di=BUF-rtp+i; r[di]=tmpx[i]; if(cd.output_scanline<cd.output_height){ rpx[0]=r[di]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[di],r[di-1],rs); }
         pr += rtp;
     }
-    
+    long long t_rows_done = get_time_ms();
+    int log_width = cd.output_width;
+    int log_height = cd.output_height;
+
     if (work_0) { free(work_0); free(work_1); free(work_2); free(work_h); free(h_line); }
-    free(rb); free(ob); jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_TRUE;
+    free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
+    LOGD("TIMING total=%lldms open=%lldms header=%lldms compress_setup=%lldms preload=%lldms rows_write=%lldms finish_encode=%lldms finish_decode=%lldms size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d lut=%d cores=%d",
+         t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
+         t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
+         t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
+         bloom, halation, grain, nativeLutSize, numCores);
+    return JNI_TRUE;
 }
 
 // --- FULL RESOLUTION DIPTYCH STITCH ENGINE (FULL STABILITY) ---

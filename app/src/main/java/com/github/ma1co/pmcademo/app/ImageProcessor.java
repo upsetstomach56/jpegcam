@@ -63,9 +63,11 @@ public class ImageProcessor {
 
         @Override protected String doInBackground(String... params) {
             try {
+                long taskStartMs = System.currentTimeMillis();
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
+                long waitStartMs = System.currentTimeMillis();
                 long lastSize = -1; int timeout = 0;
                 while (timeout < 50) {
                     long currentSize = original.length();
@@ -73,6 +75,7 @@ public class ImageProcessor {
                     lastSize = currentSize;
                     Thread.sleep(100); timeout++;
                 }
+                long waitEndMs = System.currentTimeMillis();
 
                 File dir = new File(outDir);
                 if (!dir.exists()) dir.mkdirs();
@@ -90,13 +93,13 @@ public class ImageProcessor {
                     finalJpegQuality = Math.min(90, this.jpegQuality);
                 }
 
-                System.gc(); // Force cleanup before heavy C++ engine starts
-
                 // Texture Intercept
+                long textureStartMs = System.currentTimeMillis();
                 if (MenuController.grainTextureFiles.size() > 0 && p.grainSize >= 0 && p.grainSize < MenuController.grainTextureFiles.size()) {
                     File texFile = MenuController.grainTextureFiles.get(p.grainSize);
                     mEngine.loadGrainTexture(texFile); // Load into C++ Global RAM
                 }
+                long textureEndMs = System.currentTimeMillis();
                 
                 // --- DIPTYCH COMPENSATOR ---
                 // Safely steps down physical effects to account for the smaller 6MP canvas
@@ -117,6 +120,7 @@ public class ImageProcessor {
                 int numCores = Runtime.getRuntime().availableProcessors();
                 Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
+                long nativeStartMs = System.currentTimeMillis();
                 if (mEngine.applyLutToJpeg(
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
@@ -124,7 +128,16 @@ public class ImageProcessor {
                     p.halation, finalBloom, 
                     finalJpegQuality, 
                     applyCrop, numCores)) {  // <--- ADDED numCores HERE
-                return "SAVED";
+                    long nativeEndMs = System.currentTimeMillis();
+                    Log.d("JPEG.CAM_TIMING", "wait=" + (waitEndMs - waitStartMs)
+                            + "ms texture=" + (textureEndMs - textureStartMs)
+                            + "ms native=" + (nativeEndMs - nativeStartMs)
+                            + "ms total=" + (nativeEndMs - taskStartMs)
+                            + "ms scale=" + scale
+                            + " q=" + finalJpegQuality
+                            + " bloom=" + finalBloom
+                            + " grain=" + p.grain);
+                    return "SAVED";
             }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
             return "FAILED";
