@@ -509,6 +509,9 @@ inline void process_row_yuv(
     int currInputY = row[0];
     int nextInputY = (width > 1) ? row[3] : row[0];
 
+    // Constant row grain calcs
+    int oy = abs_y + t_off_y;
+
     for(int x = 0; x < width; x++) {
         int i = x * 3;
         int oldY = currInputY;
