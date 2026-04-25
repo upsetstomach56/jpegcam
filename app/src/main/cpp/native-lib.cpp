@@ -28,6 +28,39 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     longjmp(myerr->setjmp_buffer, 1);
 }
 
+struct YuvTextureFastRowsTask {
+    unsigned char* base;
+    int rowStride;
+    int width;
+    int startY;
+    int rowStart;
+    int rowEnd;
+    int grain;
+    int scaleDenom;
+    const YuvTextureFastLut* fastLut;
+    const uint8_t* externalTex;
+    bool is1024Grain;
+};
+
+static void process_yuv_texture_fast_rows(YuvTextureFastRowsTask* task) {
+    for (int row = task->rowStart; row < task->rowEnd; row++) {
+        process_row_yuv_texture_fast(
+            task->base + row * task->rowStride,
+            task->width,
+            task->startY + row,
+            task->grain,
+            task->scaleDenom,
+            *task->fastLut,
+            task->externalTex,
+            task->is1024Grain);
+    }
+}
+
+static void* yuv_texture_fast_rows_thread(void* data) {
+    process_yuv_texture_fast_rows((YuvTextureFastRowsTask*)data);
+    return NULL;
+}
+
 long long get_time_ms() { struct timeval tv; gettimeofday(&tv, NULL); return (long long)tv.tv_sec*1000 + tv.tv_usec/1000; }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
@@ -170,31 +203,91 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long t_preload_done = get_time_ms();
 
     bool row_stream_mode = (bloom <= 0 && halation <= 0 && advancedGrainExperimental != 1);
+    bool use_fast_yuv_texture_parallel = use_fast_yuv_texture && !applyCrop && numCores > 1;
     if (row_stream_mode) {
-        while (cd.output_scanline < cd.output_height) {
-            int ay = cd.output_scanline;
-            rpx[0] = r[0];
-            jpeg_read_scanlines(&cd, rpx, 1);
+        if (use_fast_yuv_texture_parallel) {
+            int worker_count = numCores;
+            if (worker_count < 1) worker_count = 1;
+            if (worker_count > 4) worker_count = 4;
 
-            if (!applyCrop || (ay >= sk && ay < sk + fh)) {
-                if (use_rgb) {
-                    process_row_rgb(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                        opac_m, map, nativeLut.data(),
-                        nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                        externalTex, is_1024_grain);
-                } else if (use_fast_yuv_texture) {
-                    process_row_yuv_texture_fast(r[0], cd.output_width, ay,
-                        grain, scaleDenom, fast_yuv_texture_lut,
-                        externalTex, is_1024_grain);
-                } else {
-                    process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                        roll, externalTex, is_1024_grain);
+            while (cd.output_scanline < cd.output_height) {
+                int ay = cd.output_scanline;
+                int rows_read = 0;
+                while (rows_read < CHK && cd.output_scanline < cd.output_height) {
+                    JDIMENSION got = jpeg_read_scanlines(&cd, &r[rows_read], CHK - rows_read);
+                    if (got == 0) break;
+                    rows_read += (int)got;
                 }
-                jpeg_write_scanlines(&cc, rpx, 1);
+                if (rows_read <= 0) break;
+
+                int active_workers = worker_count;
+                if (active_workers > rows_read) active_workers = rows_read;
+
+                pthread_t threads[4];
+                bool created[4] = { false, false, false, false };
+                YuvTextureFastRowsTask tasks[4];
+
+                for (int t = 0; t < active_workers; t++) {
+                    int start = (rows_read * t) / active_workers;
+                    int end = (rows_read * (t + 1)) / active_workers;
+                    tasks[t].base = rb;
+                    tasks[t].rowStride = rs;
+                    tasks[t].width = cd.output_width;
+                    tasks[t].startY = ay;
+                    tasks[t].rowStart = start;
+                    tasks[t].rowEnd = end;
+                    tasks[t].grain = grain;
+                    tasks[t].scaleDenom = scaleDenom;
+                    tasks[t].fastLut = &fast_yuv_texture_lut;
+                    tasks[t].externalTex = externalTex;
+                    tasks[t].is1024Grain = is_1024_grain;
+                    if (t > 0) {
+                        created[t] = (pthread_create(&threads[t], NULL, yuv_texture_fast_rows_thread, &tasks[t]) == 0);
+                    }
+                }
+
+                process_yuv_texture_fast_rows(&tasks[0]);
+                for (int t = 1; t < active_workers; t++) {
+                    if (created[t]) {
+                        pthread_join(threads[t], NULL);
+                    } else {
+                        process_yuv_texture_fast_rows(&tasks[t]);
+                    }
+                }
+
+                int rows_written = 0;
+                while (rows_written < rows_read) {
+                    JDIMENSION wrote = jpeg_write_scanlines(&cc, &r[rows_written], rows_read - rows_written);
+                    if (wrote == 0) break;
+                    rows_written += (int)wrote;
+                }
+            }
+        } else {
+            while (cd.output_scanline < cd.output_height) {
+                int ay = cd.output_scanline;
+                rpx[0] = r[0];
+                jpeg_read_scanlines(&cd, rpx, 1);
+
+                if (!applyCrop || (ay >= sk && ay < sk + fh)) {
+                    if (use_rgb) {
+                        process_row_rgb(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
+                            shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                            grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
+                            opac_m, map, nativeLut.data(),
+                            nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                            externalTex, is_1024_grain);
+                    } else if (use_fast_yuv_texture) {
+                        process_row_yuv_texture_fast(r[0], cd.output_width, ay,
+                            grain, scaleDenom, fast_yuv_texture_lut,
+                            externalTex, is_1024_grain);
+                    } else {
+                        process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
+                            shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                            grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
+                            roll, externalTex, is_1024_grain);
+                    }
+                    jpeg_write_scanlines(&cc, rpx, 1);
+                }
             }
         }
     } else {
@@ -250,7 +343,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
          bloom, halation, grain, advancedGrainExperimental,
          nativeGrainTexture.empty() ? 0 : (is_1024_grain ? 1024 : 512),
          grainScale, nativeLutSize, numCores, row_stream_mode ? "stream" : "window",
-         use_fast_yuv_texture ? "yuv_texture" : "generic");
+         use_fast_yuv_texture_parallel ? "yuv_texture_parallel" : (use_fast_yuv_texture ? "yuv_texture" : "generic"));
     nativeLastTiming = timing;
     LOGD("TIMING %s", nativeLastTiming.c_str());
     return JNI_TRUE;
