@@ -161,6 +161,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     bool use_fast_yuv_texture = (!use_rgb && advancedGrainExperimental == 2 && externalTex != NULL
         && grain > 0 && colorChrome == 0 && chromeBlue == 0 && subtractiveSat == 0
         && bloom <= 0 && halation == 0 && vignette == 0);
+    YuvTextureFastLut fast_yuv_texture_lut;
+    if (use_fast_yuv_texture) {
+        build_yuv_texture_fast_lut(fast_yuv_texture_lut, shadowToe, rollOff, roll);
+    }
 
     JSAMPROW rpx[1];
     long long t_preload_done = get_time_ms();
@@ -182,8 +186,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                         externalTex, is_1024_grain);
                 } else if (use_fast_yuv_texture) {
                     process_row_yuv_texture_fast(r[0], cd.output_width, ay,
-                        shadowToe, rollOff, grain, scaleDenom,
-                        roll, externalTex, is_1024_grain);
+                        grain, scaleDenom, fast_yuv_texture_lut,
+                        externalTex, is_1024_grain);
                 } else {
                     process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,

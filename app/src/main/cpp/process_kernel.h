@@ -912,6 +912,20 @@ inline void sample_tex_nearest_512_xor(const uint8_t* tex, int px, int py, int* 
     outRGB[2] = tex[tex_idx + 2];
 }
 
+inline const uint8_t* sample_tex_ptr_nearest_1024(const uint8_t* tex, int px, int py) {
+    int tx = px & 1023;
+    int ty = py & 1023;
+    return tex + ((ty * 1024 + tx) * 3);
+}
+
+inline const uint8_t* sample_tex_ptr_nearest_512_xor(const uint8_t* tex, int px, int py) {
+    int tx = px & 511;
+    int ty = py & 511;
+    if (((px >> 9) ^ (py >> 9)) & 1) tx = 511 - tx;
+    if ((((px >> 9) * 3) ^ (py >> 9)) & 2) ty = 511 - ty;
+    return tex + ((ty * 512 + tx) * 3);
+}
+
 // ==========================================
 // PATH A: RGB + LUT + ANALOG PHYSICS
 // ==========================================
@@ -1262,47 +1276,66 @@ inline void process_row_yuv(
     }
 }
 
-inline void process_row_yuv_texture_fast(
-    uint8_t* row, int width, int abs_y,
-    int shadowToe, int rollOff, int grain, int scaleDenom,
-    const uint8_t* rolloff_lut,
-    const uint8_t* externalGrainTexture,
-    bool is_1024_grain)
+struct YuvTextureFastLut {
+    uint8_t tone[256];
+    uint8_t changed[256];
+    uint8_t grainEnv[256];
+    uint16_t ratio256[256];
+};
+
+inline void build_yuv_texture_fast_lut(
+    YuvTextureFastLut& out,
+    int shadowToe,
+    int rollOff,
+    const uint8_t* rolloff_lut)
 {
-    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
     const int lift = (shadowToe == 1) ? 35 : 55;
     const int liftDenom = (shadowToe == 1) ? 140 : 180;
-    const int texY = abs_y * scaleDenom;
 
-    for (int x = 0; x < width; x++) {
-        int i = x * 3;
-        int oldY = row[i];
+    for (int oldY = 0; oldY < 256; oldY++) {
         int outY = oldY;
-
         if (shadowToe > 0 && outY < lift) {
             outY += ((lift - outY) * (lift - outY)) / liftDenom;
         }
         if (rollOff > 0) outY = rolloff_lut[outY];
-
-        int cb = row[i + 1] - 128;
-        int cr = row[i + 2] - 128;
-
         if (outY < 8) outY = 8;
-        if (oldY != outY) {
-            int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
+
+        out.tone[oldY] = (uint8_t)outY;
+        out.changed[oldY] = (uint8_t)(oldY != outY);
+        out.grainEnv[oldY] = (uint8_t)grain_amount_mask(outY);
+        out.ratio256[oldY] = (uint16_t)((outY * 256) / (oldY == 0 ? 1 : oldY));
+    }
+}
+
+inline void process_row_yuv_texture_fast(
+    uint8_t* row, int width, int abs_y,
+    int grain, int scaleDenom,
+    const YuvTextureFastLut& fastLut,
+    const uint8_t* externalGrainTexture,
+    bool is_1024_grain)
+{
+    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
+    const int texY = abs_y * scaleDenom;
+
+    uint8_t* p = row;
+    int texX = 0;
+    for (int x = 0; x < width; x++, p += 3, texX += scaleDenom) {
+        int oldY = p[0];
+        int outY = fastLut.tone[oldY];
+        int cb = p[1] - 128;
+        int cr = p[2] - 128;
+
+        if (fastLut.changed[oldY]) {
+            int r256 = fastLut.ratio256[oldY];
             cb = (cb * r256) >> 8;
             cr = (cr * r256) >> 8;
         }
 
-        int env = grain_amount_mask(outY);
+        int env = fastLut.grainEnv[oldY];
         if (env > 0) {
-            int gRGB[3];
-            int texX = x * scaleDenom;
-            if (is_1024_grain) {
-                sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
-            } else {
-                sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
-            }
+            const uint8_t* gRGB = is_1024_grain
+                ? sample_tex_ptr_nearest_1024(externalGrainTexture, texX, texY)
+                : sample_tex_ptr_nearest_512_xor(externalGrainTexture, texX, texY);
 
             int r = outY + ((cr * 359) >> 8);
             int g = outY - ((cb * 88 + cr * 183) >> 8);
@@ -1322,9 +1355,9 @@ inline void process_row_yuv_texture_fast(
             cr = ((112 * r - 94 * g - 18 * b) >> 8);
         }
 
-        row[i] = (uint8_t)CLAMP(outY);
-        row[i + 1] = (uint8_t)CLAMP(128 + cb);
-        row[i + 2] = (uint8_t)CLAMP(128 + cr);
+        p[0] = (uint8_t)CLAMP(outY);
+        p[1] = (uint8_t)CLAMP(128 + cb);
+        p[2] = (uint8_t)CLAMP(128 + cr);
     }
 }
 
