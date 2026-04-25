@@ -1262,4 +1262,70 @@ inline void process_row_yuv(
     }
 }
 
+inline void process_row_yuv_texture_fast(
+    uint8_t* row, int width, int abs_y,
+    int shadowToe, int rollOff, int grain, int scaleDenom,
+    const uint8_t* rolloff_lut,
+    const uint8_t* externalGrainTexture,
+    bool is_1024_grain)
+{
+    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
+    const int lift = (shadowToe == 1) ? 35 : 55;
+    const int liftDenom = (shadowToe == 1) ? 140 : 180;
+    const int texY = abs_y * scaleDenom;
+
+    for (int x = 0; x < width; x++) {
+        int i = x * 3;
+        int oldY = row[i];
+        int outY = oldY;
+
+        if (shadowToe > 0 && outY < lift) {
+            outY += ((lift - outY) * (lift - outY)) / liftDenom;
+        }
+        if (rollOff > 0) outY = rolloff_lut[outY];
+
+        int cb = row[i + 1] - 128;
+        int cr = row[i + 2] - 128;
+
+        if (outY < 8) outY = 8;
+        if (oldY != outY) {
+            int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
+            cb = (cb * r256) >> 8;
+            cr = (cr * r256) >> 8;
+        }
+
+        int env = grain_amount_mask(outY);
+        if (env > 0) {
+            int gRGB[3];
+            int texX = x * scaleDenom;
+            if (is_1024_grain) {
+                sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
+            } else {
+                sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
+            }
+
+            int r = outY + ((cr * 359) >> 8);
+            int g = outY - ((cb * 88 + cr * 183) >> 8);
+            int b = outY + ((cb * 454) >> 8);
+
+            int blendedR = blend_overlay(r, gRGB[0]);
+            int blendedG = blend_overlay(g, gRGB[1]);
+            int blendedB = blend_overlay(b, gRGB[2]);
+
+            int mix = (texture_base_mix * env) >> 8;
+            r = r + (((blendedR - r) * mix) >> 8);
+            g = g + (((blendedG - g) * mix) >> 8);
+            b = b + (((blendedB - b) * mix) >> 8);
+
+            outY = (r * 77 + g * 150 + b * 29) >> 8;
+            cb = ((-38 * r - 74 * g + 112 * b) >> 8);
+            cr = ((112 * r - 94 * g - 18 * b) >> 8);
+        }
+
+        row[i] = (uint8_t)CLAMP(outY);
+        row[i + 1] = (uint8_t)CLAMP(128 + cb);
+        row[i + 2] = (uint8_t)CLAMP(128 + cr);
+    }
+}
+
 #endif
