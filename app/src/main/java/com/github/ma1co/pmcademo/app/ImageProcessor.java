@@ -221,15 +221,11 @@ public class ImageProcessor {
 
                 int cxxGrainEngine = p.advancedGrainExperimental;
                 if (p.grain > 0) {
-                    MenuController.getGrainEngineOptions();
-                    if (MenuController.grainTextureFiles.size() > 0) {
-                        int fileIndex = Math.max(0, Math.min(MenuController.grainTextureFiles.size() - 1, finalGrainSize));
-                        File texFile = MenuController.grainTextureFiles.get(fileIndex);
-                        if (mEngine.loadGrainTexture(texFile)) {
-                            cxxGrainEngine = 2;
-                        }
-                        textureEndMs = System.currentTimeMillis();
+                    File texFile = MenuController.getGrainTextureFile(finalGrainSize);
+                    if (mEngine.loadGrainTexture(texFile)) {
+                        cxxGrainEngine = 2;
                     }
+                    textureEndMs = System.currentTimeMillis();
                 }
 
                 int numCores = Runtime.getRuntime().availableProcessors();

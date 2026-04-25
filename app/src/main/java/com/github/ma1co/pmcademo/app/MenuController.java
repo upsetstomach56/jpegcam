@@ -36,33 +36,70 @@ public class MenuController {
 
     // --- NEW: Caches the physical files so their indexes match the menu ---
     public static java.util.List<File> grainTextureFiles = new java.util.ArrayList<File>();
+    private static String[] cachedGrainOptions = null;
+    private static String cachedGrainSignature = "";
 
-    public static String[] getGrainEngineOptions() {
-        java.util.List<String> options = new java.util.ArrayList<String>();
-        // <--- DELETED: Hardcoded legacy options
+    private static boolean isGrainTextureFile(File file) {
+        String name = file.getName().toLowerCase();
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".txt");
+    }
 
-        grainTextureFiles.clear();
+    private static String buildGrainSignature(File[] files) {
+        if (files == null) return "NULL";
+        StringBuilder signature = new StringBuilder();
+        for (File f : files) {
+            if (!isGrainTextureFile(f)) continue;
+            signature.append(f.getName())
+                    .append('|').append(f.length())
+                    .append('|').append(f.lastModified())
+                    .append(';');
+        }
+        return signature.toString();
+    }
+
+    private static synchronized void refreshGrainEngineOptions(boolean force) {
         File dir = Filepaths.getGrainDir();
+        File[] files = null;
         if (dir.exists() && dir.isDirectory()) {
-            File[] files = dir.listFiles();
-            if (files != null) {
-                java.util.Arrays.sort(files); // Keep them alphabetical
-                for (File f : files) {
-                    String name = f.getName().toLowerCase();
-                    // ADDED: .txt support for disguised images
-                    if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".txt")) {
-                        grainTextureFiles.add(f);
-                        String title = SonyFileScanner.getGrainTitle(f);
-                        options.add(title.toUpperCase()); 
-                    }
+            files = dir.listFiles();
+            if (files != null) java.util.Arrays.sort(files); // Keep them alphabetical
+        }
+
+        String signature = buildGrainSignature(files);
+        if (!force && cachedGrainOptions != null && signature.equals(cachedGrainSignature)) {
+            return;
+        }
+
+        java.util.List<String> options = new java.util.ArrayList<String>();
+        grainTextureFiles.clear();
+
+        if (files != null) {
+            for (File f : files) {
+                if (isGrainTextureFile(f)) {
+                    grainTextureFiles.add(f);
+                    String title = SonyFileScanner.getGrainTitle(f);
+                    options.add(title.toUpperCase());
                 }
             }
         }
-        
+
         // <--- NEW: Fallback if the user hasn't dropped any files on the SD card yet
         if (options.isEmpty()) options.add("NO FILES FOUND");
-        
-        return options.toArray(new String[0]);
+
+        cachedGrainSignature = signature;
+        cachedGrainOptions = options.toArray(new String[0]);
+    }
+
+    public static synchronized String[] getGrainEngineOptions() {
+        refreshGrainEngineOptions(false);
+        return cachedGrainOptions.clone();
+    }
+
+    public static synchronized File getGrainTextureFile(int index) {
+        refreshGrainEngineOptions(false);
+        if (grainTextureFiles.isEmpty()) return null;
+        int safeIndex = Math.max(0, Math.min(grainTextureFiles.size() - 1, index));
+        return grainTextureFiles.get(safeIndex);
     }
     // --- END NEW ---
 
