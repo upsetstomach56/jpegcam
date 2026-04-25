@@ -49,7 +49,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // Set to true to see diagnostic Toasts, false for clean public release
     public static final boolean DEBUG_MODE = false;
     private static final int PHOTO_READY_RETRY_MS = 75;
-    private static final int QUEUE_MEMORY_RECOVERY_DELAY_MS = 300;
 
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
@@ -520,14 +519,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (success && processingQueueManager != null) {
             processingQueueManager.removeFirst();
             if (processingQueueManager.getCount() > 0) {
-                recoverMemoryBeforeNextQueuedPhoto();
-                uiHandler.postDelayed(new Runnable() {
-                    @Override public void run() {
-                        if (processingQueueActive && processingQueueManager != null && processingQueueManager.getCount() > 0) {
-                            processNextQueuedPhoto();
-                        }
-                    }
-                }, QUEUE_MEMORY_RECOVERY_DELAY_MS);
+                processNextQueuedPhoto();
                 return;
             }
             finishQueuedProcessing();
@@ -545,17 +537,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         activeQueueEntry = null;
         processingQueueTotal = 0;
         isProcessing = false;
-        recoverMemoryBeforeNextQueuedPhoto();
         triggerLutPreload();
         applyHardwareRecipe();
         syncHardwareState();
         runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } });
-    }
-
-    private void recoverMemoryBeforeNextQueuedPhoto() {
-        activeQueueEntry = null;
-        System.runFinalization();
-        System.gc();
     }
     
     private void processWhenFileReady(final String path, final long scannerStartedMs, final long detectedMs, final int scannerAttempts) {

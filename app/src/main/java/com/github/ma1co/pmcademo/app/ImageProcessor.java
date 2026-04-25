@@ -60,21 +60,12 @@ public class ImageProcessor {
         long scannerDetectMs = (scannerStartedMs > 0 && detectedMs >= scannerStartedMs) ? detectedMs - scannerStartedMs : -1;
         long detectToStableMs = (detectedMs > 0 && stableMs >= detectedMs) ? stableMs - detectedMs : -1;
         long preProcessTotalMs = (scannerStartedMs > 0 && stableMs >= scannerStartedMs) ? stableMs - scannerStartedMs : -1;
-        Runtime runtime = Runtime.getRuntime();
-        long javaHeapFree = runtime.freeMemory();
-        long javaHeapTotal = runtime.totalMemory();
-        long javaHeapMax = runtime.maxMemory();
-        long nativeHeapAllocated = android.os.Debug.getNativeHeapAllocatedSize();
         String line = timestamp
                 + "\tresult=" + cleanLogValue(result)
                 + "\tfile=" + cleanLogValue(original.getName())
                 + "\tinput_bytes=" + original.length()
                 + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
                 + "\tjava_total=" + javaTotalMs
-                + "\tjava_heap_free=" + javaHeapFree
-                + "\tjava_heap_total=" + javaHeapTotal
-                + "\tjava_heap_max=" + javaHeapMax
-                + "\tnative_heap_allocated=" + nativeHeapAllocated
                 + "\twait=" + waitMs
                 + "\tscanner_detect=" + scannerDetectMs
                 + "\tdetect_to_stable=" + detectToStableMs
@@ -290,12 +281,6 @@ public class ImageProcessor {
             return "FAILED";
         }
 
-        @Override protected void onPostExecute(String result) {
-            p = null;
-            outDir = null;
-            lutPath = null;
-            lutName = null;
-            mCallback.onProcessFinished(result);
-        }
+        @Override protected void onPostExecute(String result) { mCallback.onProcessFinished(result); }
     }
 }
