@@ -48,6 +48,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // --- GLOBAL DEBUG FLAG ---
     // Set to true to see diagnostic Toasts, false for clean public release
     public static final boolean DEBUG_MODE = false;
+    private static final int PHOTO_READY_RETRY_MS = 75;
 
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
@@ -427,7 +428,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 
                 long currentSize = f.length();
-                if (currentSize > 0 && currentSize == lastSize[0]) {
+                if (currentSize > 0 && (hasJpegEndMarker(f, currentSize) || currentSize == lastSize[0])) {
                     long stableMs = System.currentTimeMillis();
                     // --- DIPTYCH INTERCEPT ---
                     if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
@@ -442,7 +443,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
                     retries[0]++;
-                    uiHandler.postDelayed(this, 100);
+                    uiHandler.postDelayed(this, PHOTO_READY_RETRY_MS);
                 } else {
                     isProcessing = false;
                     updateMainHUD();
@@ -451,6 +452,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         };
         
         uiHandler.post(checker);
+    }
+
+    private boolean hasJpegEndMarker(File f, long length) {
+        if (length < 2) return false;
+        java.io.RandomAccessFile raf = null;
+        try {
+            raf = new java.io.RandomAccessFile(f, "r");
+            raf.seek(length - 2);
+            return raf.read() == 0xFF && raf.read() == 0xD9;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (raf != null) {
+                try { raf.close(); } catch (Exception ignored) {}
+            }
+        }
     }
 
     private void triggerLutPreload() {

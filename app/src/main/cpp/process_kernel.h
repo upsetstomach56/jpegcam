@@ -901,11 +901,38 @@ inline void sample_tex_nearest_1024(const uint8_t* tex, int px, int py, int* out
     outRGB[2] = tex[tex_idx + 2];
 }
 
+inline void sample_tex_nearest_1024_transform(const uint8_t* tex, int px, int py, int transform, int* outRGB) {
+    int tx = px & 1023;
+    int ty = py & 1023;
+    if (transform & 1) tx = 1023 - tx;
+    if (transform & 2) ty = 1023 - ty;
+    int tex_idx = (ty * 1024 + tx) * 3;
+    outRGB[0] = tex[tex_idx];
+    outRGB[1] = tex[tex_idx + 1];
+    outRGB[2] = tex[tex_idx + 2];
+}
+
 inline void sample_tex_nearest_512_xor(const uint8_t* tex, int px, int py, int* outRGB) {
     int tx = px & 511;
     int ty = py & 511;
     if (((px >> 9) ^ (py >> 9)) & 1) tx = 511 - tx;
     if ((((px >> 9) * 3) ^ (py >> 9)) & 2) ty = 511 - ty;
+    int tex_idx = (ty * 512 + tx) * 3;
+    outRGB[0] = tex[tex_idx];
+    outRGB[1] = tex[tex_idx + 1];
+    outRGB[2] = tex[tex_idx + 2];
+}
+
+inline void sample_tex_nearest_512_xor_transform(const uint8_t* tex, int px, int py, int transform, int* outRGB) {
+    int px2 = px & 2047;
+    int py2 = py & 2047;
+    if (transform & 1) px2 = 2047 - px2;
+    if (transform & 2) py2 = 2047 - py2;
+
+    int tx = px2 & 511;
+    int ty = py2 & 511;
+    if (((px2 >> 9) ^ (py2 >> 9)) & 1) tx = 511 - tx;
+    if ((((px2 >> 9) * 3) ^ (py2 >> 9)) & 2) ty = 511 - ty;
     int tex_idx = (ty * 512 + tx) * 3;
     outRGB[0] = tex[tex_idx];
     outRGB[1] = tex[tex_idx + 1];
@@ -918,11 +945,32 @@ inline const uint8_t* sample_tex_ptr_nearest_1024(const uint8_t* tex, int px, in
     return tex + ((ty * 1024 + tx) * 3);
 }
 
+inline const uint8_t* sample_tex_ptr_nearest_1024_transform(const uint8_t* tex, int px, int py, int transform) {
+    int tx = px & 1023;
+    int ty = py & 1023;
+    if (transform & 1) tx = 1023 - tx;
+    if (transform & 2) ty = 1023 - ty;
+    return tex + ((ty * 1024 + tx) * 3);
+}
+
 inline const uint8_t* sample_tex_ptr_nearest_512_xor(const uint8_t* tex, int px, int py) {
     int tx = px & 511;
     int ty = py & 511;
     if (((px >> 9) ^ (py >> 9)) & 1) tx = 511 - tx;
     if ((((px >> 9) * 3) ^ (py >> 9)) & 2) ty = 511 - ty;
+    return tex + ((ty * 512 + tx) * 3);
+}
+
+inline const uint8_t* sample_tex_ptr_nearest_512_xor_transform(const uint8_t* tex, int px, int py, int transform) {
+    int px2 = px & 2047;
+    int py2 = py & 2047;
+    if (transform & 1) px2 = 2047 - px2;
+    if (transform & 2) py2 = 2047 - py2;
+
+    int tx = px2 & 511;
+    int ty = py2 & 511;
+    if (((px2 >> 9) ^ (py2 >> 9)) & 1) tx = 511 - tx;
+    if ((((px2 >> 9) * 3) ^ (py2 >> 9)) & 2) ty = 511 - ty;
     return tex + ((ty * 512 + tx) * 3);
 }
 
@@ -937,7 +985,8 @@ inline void process_row_rgb(
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
     const uint8_t* externalGrainTexture = NULL,
-    bool is_1024_grain = false)
+    bool is_1024_grain = false,
+    int grainTransform = 0)
 {
     int s_roll   = rollOff * 20;
     int s_chrome = colorChrome * 40;
@@ -1078,9 +1127,11 @@ inline void process_row_rgb(
                 int texX = x * scaleDenom;
                 int texY = abs_y * scaleDenom;
                 if (is_1024_grain) {
-                    sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
+                    if (grainTransform == 0) sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
+                    else sample_tex_nearest_1024_transform(externalGrainTexture, texX, texY, grainTransform, gRGB);
                 } else {
-                    sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
+                    if (grainTransform == 0) sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
+                    else sample_tex_nearest_512_xor_transform(externalGrainTexture, texX, texY, grainTransform, gRGB);
                 }
                 tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
 
@@ -1132,7 +1183,8 @@ inline void process_row_yuv(
     int grain, int grainSize, int scaleDenom, int advancedGrainExperimental, uint32_t& seed,
     const uint8_t* rolloff_lut,
     const uint8_t* externalGrainTexture = NULL,
-    bool is_1024_grain = false)
+    bool is_1024_grain = false,
+    int grainTransform = 0)
 {
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
@@ -1224,9 +1276,11 @@ inline void process_row_yuv(
                 int texX = x * scaleDenom;
                 int texY = abs_y * scaleDenom;
                 if (is_1024_grain) {
-                    sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
+                    if (grainTransform == 0) sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
+                    else sample_tex_nearest_1024_transform(externalGrainTexture, texX, texY, grainTransform, gRGB);
                 } else {
-                    sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
+                    if (grainTransform == 0) sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
+                    else sample_tex_nearest_512_xor_transform(externalGrainTexture, texX, texY, grainTransform, gRGB);
                 }
                 tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
 
@@ -1312,14 +1366,23 @@ inline void process_row_yuv_texture_fast(
     int grain, int scaleDenom,
     const YuvTextureFastLut& fastLut,
     const uint8_t* externalGrainTexture,
-    bool is_1024_grain)
+    bool is_1024_grain,
+    int grainTransform)
 {
     const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
-    const int texY = abs_y * scaleDenom;
+    const bool transformActive = (grainTransform != 0);
+    const int texPeriodMask = is_1024_grain ? 1023 : 2047;
+    const int baseTexY = abs_y * scaleDenom;
+    const int texY = transformActive
+        ? ((grainTransform & 2) ? (texPeriodMask - (baseTexY & texPeriodMask)) : (baseTexY & texPeriodMask))
+        : baseTexY;
+    const int texStep = transformActive
+        ? (((grainTransform & 1) ? -scaleDenom : scaleDenom) & texPeriodMask)
+        : scaleDenom;
 
     uint8_t* p = row;
-    int texX = 0;
-    for (int x = 0; x < width; x++, p += 3, texX += scaleDenom) {
+    int texX = (transformActive && (grainTransform & 1)) ? texPeriodMask : 0;
+    for (int x = 0; x < width; x++, p += 3) {
         int oldY = p[0];
         int outY = fastLut.tone[oldY];
         int cb = p[1] - 128;
@@ -1358,6 +1421,7 @@ inline void process_row_yuv_texture_fast(
         p[0] = (uint8_t)CLAMP(outY);
         p[1] = (uint8_t)CLAMP(128 + cb);
         p[2] = (uint8_t)CLAMP(128 + cr);
+        texX = transformActive ? ((texX + texStep) & texPeriodMask) : (texX + texStep);
     }
 }
 

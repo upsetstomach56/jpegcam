@@ -17,8 +17,8 @@ public class SonyFileScanner {
     private Handler backgroundHandler;
     private Handler mainHandler;
 
-    private static final int POLL_INTERVAL_MS = 150;
-    private static final int MAX_SCAN_ATTEMPTS = 34;
+    private static final int POLL_INTERVAL_MS = 75;
+    private static final int MAX_SCAN_ATTEMPTS = 67;
     public boolean isPolling = false;
     private int scanAttempts = 0;
     private long scanStartedMs = 0;

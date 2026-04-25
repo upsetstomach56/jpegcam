@@ -21,6 +21,7 @@ std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
 std::vector<uint8_t> nativeGrainTexture;
 std::string nativeLastTiming;
+int nativeLastGrainTransform = -1;
 
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
@@ -40,6 +41,7 @@ struct YuvTextureFastRowsTask {
     const YuvTextureFastLut* fastLut;
     const uint8_t* externalTex;
     bool is1024Grain;
+    int grainTransform;
 };
 
 static void process_yuv_texture_fast_rows(YuvTextureFastRowsTask* task) {
@@ -52,7 +54,8 @@ static void process_yuv_texture_fast_rows(YuvTextureFastRowsTask* task) {
             task->scaleDenom,
             *task->fastLut,
             task->externalTex,
-            task->is1024Grain);
+            task->is1024Grain,
+            task->grainTransform);
     }
 }
 
@@ -62,6 +65,18 @@ static void* yuv_texture_fast_rows_thread(void* data) {
 }
 
 long long get_time_ms() { struct timeval tv; gettimeofday(&tv, NULL); return (long long)tv.tv_sec*1000 + tv.tv_usec/1000; }
+
+static int choose_grain_transform(uint32_t seed, bool enabled) {
+    if (!enabled) return 0;
+    uint32_t h = seed ^ (seed >> 16) ^ 0x9E3779B9u;
+    h ^= h >> 13;
+    h *= 0x85EBCA6Bu;
+    h ^= h >> 16;
+    int transform = (int)(h & 3u);
+    if (transform == nativeLastGrainTransform) transform = (transform + 1) & 3;
+    nativeLastGrainTransform = transform;
+    return transform;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
     nativeLut.clear(); nativeLutSize = 0; const char *fp = env->GetStringUTFChars(path, NULL); std::string ps(fp); std::string ex = ""; size_t dp = ps.find_last_of('.');
@@ -191,6 +206,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if (grain_seed == 0) grain_seed = 98765;
     const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
     bool is_1024_grain = nativeGrainTexture.size() > 1000000;
+    int grainTransform = choose_grain_transform(grain_seed, advancedGrainExperimental == 2 && externalTex != NULL && grain > 0);
     bool use_fast_yuv_texture = (!use_rgb && advancedGrainExperimental == 2 && externalTex != NULL
         && grain > 0 && colorChrome == 0 && chromeBlue == 0 && subtractiveSat == 0
         && bloom <= 0 && halation == 0 && vignette == 0);
@@ -241,6 +257,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                     tasks[t].fastLut = &fast_yuv_texture_lut;
                     tasks[t].externalTex = externalTex;
                     tasks[t].is1024Grain = is_1024_grain;
+                    tasks[t].grainTransform = grainTransform;
                     if (t > 0) {
                         created[t] = (pthread_create(&threads[t], NULL, yuv_texture_fast_rows_thread, &tasks[t]) == 0);
                     }
@@ -275,16 +292,16 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
                             opac_m, map, nativeLut.data(),
                             nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                            externalTex, is_1024_grain);
+                            externalTex, is_1024_grain, grainTransform);
                     } else if (use_fast_yuv_texture) {
                         process_row_yuv_texture_fast(r[0], cd.output_width, ay,
                             grain, scaleDenom, fast_yuv_texture_lut,
-                            externalTex, is_1024_grain);
+                            externalTex, is_1024_grain, grainTransform);
                     } else {
                         process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                            roll, externalTex, is_1024_grain);
+                            roll, externalTex, is_1024_grain, grainTransform);
                     }
                     jpeg_write_scanlines(&cc, rpx, 1);
                 }
@@ -313,12 +330,12 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
                             opac_m, map, nativeLut.data(),
                             nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                            externalTex, is_1024_grain);
+                            externalTex, is_1024_grain, grainTransform);
                     } else {
                         process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                            roll, externalTex, is_1024_grain);
+                            roll, externalTex, is_1024_grain, grainTransform);
                     }
                 }
             }
@@ -336,13 +353,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
     char timing[512];
     snprintf(timing, sizeof(timing),
-         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_engine=%d grain_tex=%d grain_scale=%d lut=%d cores=%d row_mode=%s fast_path=%s",
+         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_engine=%d grain_tex=%d grain_transform=%d grain_scale=%d lut=%d cores=%d row_mode=%s fast_path=%s",
          t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
          t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
          t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
          bloom, halation, grain, advancedGrainExperimental,
          nativeGrainTexture.empty() ? 0 : (is_1024_grain ? 1024 : 512),
-         grainScale, nativeLutSize, numCores, row_stream_mode ? "stream" : "window",
+         grainTransform, grainScale, nativeLutSize, numCores, row_stream_mode ? "stream" : "window",
          use_fast_yuv_texture_parallel ? "yuv_texture_parallel" : (use_fast_yuv_texture ? "yuv_texture" : "generic"));
     nativeLastTiming = timing;
     LOGD("TIMING %s", nativeLastTiming.c_str());
