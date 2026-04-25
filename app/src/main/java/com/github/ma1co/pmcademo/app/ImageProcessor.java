@@ -53,6 +53,7 @@ public class ImageProcessor {
                                         long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts,
                                         int qualityIdx, int scale, int finalJpegQuality,
                                         int finalGrainSize, int finalBloom, int numCores,
+                                        int finalGrainEngine,
                                         RTLProfile p, boolean applyCrop, boolean isDiptych,
                                         String nativeTiming) {
         String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
@@ -85,7 +86,7 @@ public class ImageProcessor {
                 + "\topacity=" + p.opacity
                 + "\tgrain=" + p.grain
                 + "\tgrain_size=" + finalGrainSize
-                + "\tgrain_engine=" + p.advancedGrainExperimental
+                + "\tgrain_engine=" + finalGrainEngine
                 + "\tvignette=" + p.vignette
                 + "\trolloff=" + p.rollOff
                 + "\tcolor_chrome=" + p.colorChrome
@@ -219,6 +220,9 @@ public class ImageProcessor {
                 }
 
                 int cxxGrainEngine = p.advancedGrainExperimental;
+                if (cxxGrainEngine == 1) {
+                    cxxGrainEngine = 0;
+                }
                 if (cxxGrainEngine >= 2) {
                     int fileIndex = cxxGrainEngine - 2;
                     if (fileIndex >= 0 && fileIndex < MenuController.grainTextureFiles.size()) {
@@ -248,7 +252,7 @@ public class ImageProcessor {
                         nativeEndMs - nativeStartMs, nativeEndMs - taskStartMs,
                         scannerStartedMs, detectedMs, stableMs, scannerAttempts,
                         qualityIdx, scale, finalJpegQuality, finalGrainSize, finalBloom,
-                        numCores, p, applyCrop, isDiptych, nativeTiming);
+                        numCores, cxxGrainEngine, p, applyCrop, isDiptych, nativeTiming);
                 if (success) {
                     Log.d("JPEG.CAM_TIMING", "wait=" + (waitEndMs - waitStartMs)
                             + "ms texture=" + (textureEndMs - textureStartMs)
