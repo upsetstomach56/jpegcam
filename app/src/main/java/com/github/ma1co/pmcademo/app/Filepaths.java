@@ -4,7 +4,6 @@ import android.os.Environment;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 public class Filepaths {
 
@@ -75,10 +74,26 @@ public class Filepaths {
     public static File getRecipeDir() { File d = new File(getAppDir(), "RECIPES"); if (!d.exists()) d.mkdirs(); return d; }
     public static File getLensesDir() { File d = new File(getAppDir(), "LENSES"); if (!d.exists()) d.mkdirs(); return d; }
     public static File getGradedDir() { File d = new File(getAppDir(), "GRADED"); if (!d.exists()) d.mkdirs(); return d; }
-    public static File getLogDir() { File d = new File(getAppDir(), "LOGS"); if (!d.exists()) d.mkdirs(); return d; }
 
     public static void buildAppStructure() {
-        getAppDir(); getLutDir(); getRecipeDir(); getLensesDir(); getGradedDir(); getGrainDir(); getLogDir();
+        getAppDir(); getLutDir(); getRecipeDir(); getLensesDir(); getGradedDir(); getGrainDir();
+        cleanupDebugLogs();
+    }
+
+    private static void deleteIfExists(File file) {
+        if (file.exists() && file.isFile()) file.delete();
+    }
+
+    private static void cleanupDebugLogs() {
+        File appDir = getAppDir();
+        File gradedDir = getGradedDir();
+        File logDir = new File(appDir, "LOGS");
+        deleteIfExists(new File(appDir, "TIMING.TXT"));
+        deleteIfExists(new File(gradedDir, "TIMING.TXT"));
+        deleteIfExists(new File(logDir, "TIMING.TXT"));
+        deleteIfExists(new File(logDir, "processing_times.txt"));
+        File[] remainingLogs = logDir.listFiles();
+        if (remainingLogs != null && remainingLogs.length == 0) logDir.delete();
     }
 
     // NEW: Extracts bundled starter files explicitly (Bypasses API 10 list() bug)

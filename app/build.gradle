@@ -11,8 +11,8 @@ android {
         targetSdkVersion 25
         
         // Bumped versioning for the JPEG.CAM era
-        versionCode 41
-        versionName "1.98"
+        versionCode 42
+        versionName "1.99"
         
         externalNativeBuild {
             cmake {

@@ -20,7 +20,6 @@
 std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
 std::vector<uint8_t> nativeGrainTexture;
-std::string nativeLastTiming;
 int nativeLastGrainTransform = -1;
 
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
@@ -102,10 +101,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); return JNI_TRUE; } stbi_image_free(id); } return JNI_FALSE;
 }
 
-extern "C" JNIEXPORT jstring JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_getLastTimingNative(JNIEnv* env, jobject obj) {
-    return env->NewStringUTF(nativeLastTiming.c_str());
-}
-
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath,
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
@@ -114,14 +109,12 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     jint bloom, jint advancedGrainExperimental, jint jpegQuality,
     jboolean applyCrop, jint numCores) {
 
-    nativeLastTiming = "native_status=started";
     long long st = get_time_ms(); const char *ifn = env->GetStringUTFChars(inPath, NULL); const char *ofn = env->GetStringUTFChars(outPath, NULL);
     FILE *inf = fopen(ifn, "rb"), *ouf = fopen(ofn, "wb");
-    if(!inf||!ouf){ nativeLastTiming = "native_status=open_failed"; if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
-    long long t_open = get_time_ms();
+    if(!inf||!ouf){ if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
 
     struct jpeg_decompress_struct cd; struct my_error_mgr jd; cd.err = jpeg_std_error(&jd.pub); jd.pub.error_exit = my_error_exit;
-    if(setjmp(jd.setjmp_buffer)){ nativeLastTiming = "native_status=decode_error"; jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    if(setjmp(jd.setjmp_buffer)){ jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
     jpeg_create_decompress(&cd); jpeg_stdio_src(&cd, inf); 
     
     // --- PRESERVE ALL SONY MARKERS ---
@@ -134,10 +127,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     cd.scale_denom = scaleDenom;
     cd.out_color_space = use_rgb ? JCS_RGB : JCS_YCbCr;
     jpeg_start_decompress(&cd);
-    long long t_decode_start = get_time_ms();
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
-    if(setjmp(jc.setjmp_buffer)){ nativeLastTiming = "native_status=compress_error"; jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    if(setjmp(jc.setjmp_buffer)){ jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
     jpeg_create_compress(&cc); jpeg_stdio_dest(&cc, ouf);
     
     int fh = cd.output_height, sk = 0; if(applyCrop){ fh=(int)(cd.output_width/2.71f); sk=(cd.output_height-fh)/2; }
@@ -151,7 +143,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         jpeg_write_marker(&cc, mark->marker, mark->data, mark->data_length);
         mark = mark->next;
     }
-    long long t_compress_start = get_time_ms();
 
     int rs = cd.output_width*3;
     const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
@@ -166,7 +157,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     unsigned char* rb = (unsigned char*)malloc(BUF*rs);
     unsigned char* ob = (unsigned char*)malloc(CHK*rs);
     if (!rb || !ob) {
-        nativeLastTiming = "native_status=row_buffer_alloc_failed";
         if (rb) free(rb);
         if (ob) free(ob);
         jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc);
@@ -185,15 +175,12 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if (advancedGrainExperimental == 2 && externalTex != NULL && grain > 0) {
         ensure_overlay_blend_lut();
     }
-    int grainScale = grain_resolution_scale256(scaleDenom);
-
     int ws_s = cd.output_width * sizeof(int);
     int* work_0 = NULL; int* work_1 = NULL; int* work_2 = NULL; int* work_h = NULL; int* h_line = NULL;
     if (bloom > 0 || halation > 0) {
         work_0 = (int*)malloc(ws_s); work_1 = (int*)malloc(ws_s); work_2 = (int*)malloc(ws_s);
         work_h = (int*)malloc(ws_s); h_line = (int*)malloc(ws_s);
         if (!work_0 || !work_1 || !work_2 || !work_h || !h_line) {
-            nativeLastTiming = "native_status=effect_buffer_alloc_failed";
             free(rb); free(ob);
             if(work_0) free(work_0); if(work_1) free(work_1); if(work_2) free(work_2);
             if(work_h) free(work_h); if(h_line) free(h_line);
@@ -219,7 +206,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     }
 
     JSAMPROW rpx[1];
-    long long t_preload_done = get_time_ms();
 
     bool row_stream_mode = (bloom <= 0 && halation <= 0 && advancedGrainExperimental != 1);
     bool use_fast_yuv_texture_parallel = use_fast_yuv_texture && !applyCrop && numCores > 1;
@@ -314,7 +300,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     } else {
         if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
         for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
-        t_preload_done = get_time_ms();
 
         int pr = 0; while(pr < (int)cd.output_height){
             int rtp = std::min(CHK, (int)cd.output_height-pr);
@@ -349,24 +334,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
             pr += rtp;
         }
     }
-    long long t_rows_done = get_time_ms();
-    int log_width = cd.output_width;
-    int log_height = cd.output_height;
 
     if (work_0) { free(work_0); free(work_1); free(work_2); free(work_h); free(h_line); }
-    free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
-    char timing[768];
-    snprintf(timing, sizeof(timing),
-         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_engine=%d grain_tex=%d grain_transform=%d grain_scale=%d lut=%d cores=%d chunk=%d row_mode=%s fast_path=%s",
-         t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
-         t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
-         t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
-         bloom, halation, grain, advancedGrainExperimental,
-         nativeGrainTexture.empty() ? 0 : (is_1024_grain ? 1024 : 512),
-         grainTransform, grainScale, nativeLutSize, numCores, CHK, row_stream_mode ? "stream" : "window",
-         use_fast_yuv_texture_parallel ? "yuv_texture_parallel" : (use_fast_yuv_texture ? "yuv_texture" : "generic"));
-    nativeLastTiming = timing;
-    LOGD("TIMING %s", nativeLastTiming.c_str());
+    free(rb); free(ob); jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
     return JNI_TRUE;
 }
 

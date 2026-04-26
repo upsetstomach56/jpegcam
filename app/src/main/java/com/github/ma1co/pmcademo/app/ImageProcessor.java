@@ -1,20 +1,12 @@
 package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
-import android.content.Intent;
-import android.net.Uri;
 import android.os.AsyncTask;
 import android.util.Log;
-import java.io.FileWriter;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
 
 public class ImageProcessor {
     private LutEngine mEngine;
-    private Context mContext;
     private ProcessorCallback mCallback;
 
     public interface ProcessorCallback {
@@ -25,94 +17,8 @@ public class ImageProcessor {
     }
 
     public ImageProcessor(Context context, ProcessorCallback callback) {
-        this.mContext = context;
         this.mCallback = callback;
         this.mEngine = new LutEngine();
-    }
-
-    private String cleanLogValue(String value) {
-        if (value == null) return "";
-        return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
-    }
-
-    private void appendLogLine(File logFile, String line) throws Exception {
-        File parent = logFile.getParentFile();
-        if (parent != null && !parent.exists()) parent.mkdirs();
-        FileWriter writer = null;
-        try {
-            writer = new FileWriter(logFile, true);
-            writer.write(line);
-        } finally {
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
-        }
-        mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(logFile)));
-    }
-
-    private void appendProcessingTiming(File original, File outFile, String result,
-                                        long waitMs, long textureMs, long nativeMs, long javaTotalMs,
-                                        long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts,
-                                        int qualityIdx, int scale, int finalJpegQuality,
-                                        int finalGrainSize, int finalBloom, int numCores,
-                                        int finalGrainEngine,
-                                        RTLProfile p, boolean applyCrop, boolean isDiptych,
-                                        String nativeTiming) {
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-        long scannerDetectMs = (scannerStartedMs > 0 && detectedMs >= scannerStartedMs) ? detectedMs - scannerStartedMs : -1;
-        long detectToStableMs = (detectedMs > 0 && stableMs >= detectedMs) ? stableMs - detectedMs : -1;
-        long preProcessTotalMs = (scannerStartedMs > 0 && stableMs >= scannerStartedMs) ? stableMs - scannerStartedMs : -1;
-        String line = timestamp
-                + "\tresult=" + cleanLogValue(result)
-                + "\tfile=" + cleanLogValue(original.getName())
-                + "\tinput_bytes=" + original.length()
-                + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
-                + "\tjava_total=" + javaTotalMs
-                + "\twait=" + waitMs
-                + "\tscanner_detect=" + scannerDetectMs
-                + "\tdetect_to_stable=" + detectToStableMs
-                + "\tpre_process_total=" + preProcessTotalMs
-                + "\tscanner_attempts=" + scannerAttempts
-                + "\ttexture=" + textureMs
-                + "\tnative=" + nativeMs
-                + "\tquality_idx=" + qualityIdx
-                + "\tscale=" + scale
-                + "\tjpeg_q=" + finalJpegQuality
-                + "\tcrop=" + applyCrop
-                + "\tdiptych=" + isDiptych
-                + "\tcores=" + numCores
-                + "\twhite_balance=" + cleanLogValue(p.whiteBalance)
-                + "\twb_shift=" + p.wbShift
-                + "\twb_shift_gm=" + p.wbShiftGM
-                + "\tcolor_mode=" + cleanLogValue(p.colorMode)
-                + "\topacity=" + p.opacity
-                + "\tgrain=" + p.grain
-                + "\tgrain_size=" + finalGrainSize
-                + "\tgrain_engine=" + finalGrainEngine
-                + "\tvignette=" + p.vignette
-                + "\trolloff=" + p.rollOff
-                + "\tcolor_chrome=" + p.colorChrome
-                + "\tchrome_blue=" + p.chromeBlue
-                + "\tshadow_toe=" + p.shadowToe
-                + "\tsubtractive_sat=" + p.subtractiveSat
-                + "\thalation=" + p.halation
-                + "\tbloom=" + finalBloom
-                + "\t" + cleanLogValue(nativeTiming)
-                + "\n";
-
-        File[] logFiles = new File[] {
-                new File(Filepaths.getAppDir(), "TIMING.TXT"),
-                new File(Filepaths.getGradedDir(), "TIMING.TXT"),
-                new File(Filepaths.getLogDir(), "TIMING.TXT"),
-                new File(Filepaths.getLogDir(), "processing_times.txt")
-        };
-
-        for (File logFile : logFiles) {
-            try {
-                appendLogLine(logFile, line);
-                Log.d("JPEG.CAM_TIMING", "Wrote timing log: " + logFile.getAbsolutePath());
-            } catch (Exception e) {
-                Log.e("JPEG.CAM_TIMING", "Failed timing log " + logFile.getAbsolutePath() + ": " + e.getMessage());
-            }
-        }
     }
 
     public void triggerLutPreload(String lutPath, String lutName) {
@@ -155,10 +61,7 @@ public class ImageProcessor {
         private boolean isDiptych;
         private String lutPath;
         private String lutName;
-        private long scannerStartedMs;
-        private long detectedMs;
         private long stableMs;
-        private int scannerAttempts;
 
         public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych,
                            String lutPath, String lutName,
@@ -171,21 +74,16 @@ public class ImageProcessor {
             this.isDiptych   = isDiptych;
             this.lutPath     = lutPath;
             this.lutName     = lutName;
-            this.scannerStartedMs = scannerStartedMs;
-            this.detectedMs = detectedMs;
             this.stableMs = stableMs;
-            this.scannerAttempts = scannerAttempts;
         }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
 
         @Override protected String doInBackground(String... params) {
             try {
-                long taskStartMs = System.currentTimeMillis();
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
-                long waitStartMs = System.currentTimeMillis();
                 if (stableMs <= 0) {
                     long lastSize = -1; int timeout = 0;
                     while (timeout < 50) {
@@ -195,7 +93,6 @@ public class ImageProcessor {
                         Thread.sleep(100); timeout++;
                     }
                 }
-                long waitEndMs = System.currentTimeMillis();
 
                 if (lutPath != null || lutName != null) {
                     if (!mEngine.loadLut(lutPath, lutName)) return "FAILED";
@@ -217,9 +114,6 @@ public class ImageProcessor {
                     finalJpegQuality = Math.min(90, this.jpegQuality);
                 }
 
-                long textureStartMs = System.currentTimeMillis();
-                long textureEndMs = textureStartMs;
-                
                 // --- DIPTYCH COMPENSATOR ---
                 // Safely steps down physical effects to account for the smaller 6MP canvas
                 int finalGrainSize = p.grainSize;
@@ -242,13 +136,10 @@ public class ImageProcessor {
                     if (mEngine.loadGrainTexture(texFile)) {
                         cxxGrainEngine = 2;
                     }
-                    textureEndMs = System.currentTimeMillis();
                 }
 
                 int numCores = Runtime.getRuntime().availableProcessors();
-                Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
-                long nativeStartMs = System.currentTimeMillis();
                 boolean success = mEngine.applyLutToJpeg(
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
@@ -257,24 +148,7 @@ public class ImageProcessor {
                     cxxGrainEngine,
                     finalJpegQuality, 
                     applyCrop, numCores);  // <--- ADDED numCores HERE
-                long nativeEndMs = System.currentTimeMillis();
-                String nativeTiming = mEngine.getLastNativeTiming();
-                appendProcessingTiming(original, outFile, success ? "SAVED" : "FAILED",
-                        waitEndMs - waitStartMs, textureEndMs - textureStartMs,
-                        nativeEndMs - nativeStartMs, nativeEndMs - taskStartMs,
-                        scannerStartedMs, detectedMs, stableMs, scannerAttempts,
-                        qualityIdx, scale, finalJpegQuality, finalGrainSize, finalBloom,
-                        numCores, cxxGrainEngine, p, applyCrop, isDiptych, nativeTiming);
                 if (success) {
-                    Log.d("JPEG.CAM_TIMING", "wait=" + (waitEndMs - waitStartMs)
-                            + "ms texture=" + (textureEndMs - textureStartMs)
-                            + "ms native=" + (nativeEndMs - nativeStartMs)
-                            + "ms total=" + (nativeEndMs - taskStartMs)
-                            + "ms scale=" + scale
-                            + " q=" + finalJpegQuality
-                            + " bloom=" + finalBloom
-                            + " grain=" + p.grain
-                            + " " + nativeTiming);
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
