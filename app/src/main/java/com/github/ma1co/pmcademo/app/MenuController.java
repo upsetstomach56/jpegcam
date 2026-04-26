@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.hardware.Camera;
+import android.media.ExifInterface;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -42,8 +43,8 @@ public class MenuController {
     public static final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
     private static final int PROCESSING_FREQUENCY_MANUAL = -1;
     private static final int MANUAL_QUEUE_PAGE_SIZE = 5;
-    private static final int MANUAL_QUEUE_THUMB_WIDTH = 192;
-    private static final int MANUAL_QUEUE_THUMB_HEIGHT = 108;
+    private static final int MANUAL_QUEUE_THUMB_WIDTH = 96;
+    private static final int MANUAL_QUEUE_THUMB_HEIGHT = 54;
     private static final int MANUAL_QUEUE_THUMB_CACHE_LIMIT = 24;
     private static final String[] CUSTOM_BUTTON_LABELS = {
             "OFF",
@@ -1000,8 +1001,7 @@ public class MenuController {
             row++;
         }
         if (queueCount > 0) {
-            tvSubtitle.setText("Manual Queue " + (manualQueueOffset + 1) + "-" + end + "/" + queueCount
-                    + (thumbsLoading ? " | LOADING" : ""));
+            setManualQueueSubtitle(queueCount, end, thumbsLoading);
         } else {
             tvSubtitle.setText("Manual Queue (EMPTY)");
         }
@@ -1086,9 +1086,11 @@ public class MenuController {
                             thumbnailDecodeFailures.add(cacheKey);
                         }
 
-                        if (manualQueueOpen && row >= 0 && row < thumbs.length && cacheKey.equals(thumbs[row].getTag())) {
-                            if (bitmap != null) thumbs[row].setImageBitmap(bitmap);
-                            render();
+                        if (manualQueueOpen) {
+                            if (row >= 0 && row < thumbs.length && cacheKey.equals(thumbs[row].getTag()) && bitmap != null) {
+                                thumbs[row].setImageBitmap(bitmap);
+                            }
+                            refreshManualQueueLoadingLabel();
                         }
                     }
                 });
@@ -1097,6 +1099,9 @@ public class MenuController {
     }
 
     private Bitmap decodeQueueThumbnail(String imagePath) {
+        Bitmap embedded = decodeExifThumbnail(imagePath);
+        if (embedded != null) return embedded;
+
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
@@ -1107,6 +1112,26 @@ public class MenuController {
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
             opts.inDither = true;
             return BitmapFactory.decodeFile(imagePath, opts);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Bitmap decodeExifThumbnail(String imagePath) {
+        try {
+            ExifInterface exif = new ExifInterface(imagePath);
+            byte[] data = exif.getThumbnail();
+            if (data == null || data.length == 0) return null;
+
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = calculateThumbnailSample(bounds.outWidth, bounds.outHeight);
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            opts.inDither = true;
+            return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
         } catch (Exception ignored) {
             return null;
         }
@@ -1133,6 +1158,32 @@ public class MenuController {
         thumbnailCache.clear();
         thumbnailLoadsInFlight.clear();
         thumbnailDecodeFailures.clear();
+    }
+
+    private void setManualQueueSubtitle(int queueCount, int end, boolean thumbsLoading) {
+        tvSubtitle.setText("Manual Queue " + (manualQueueOffset + 1) + "-" + end + "/" + queueCount
+                + (thumbsLoading ? " | LOADING" : ""));
+    }
+
+    private void refreshManualQueueLoadingLabel() {
+        if (!manualQueueOpen) return;
+        int queueCount = host.getQueuedPhotoCount();
+        if (queueCount <= 0) {
+            tvSubtitle.setText("Manual Queue (EMPTY)");
+            return;
+        }
+
+        int end = Math.min(queueCount, manualQueueOffset + MANUAL_QUEUE_PAGE_SIZE);
+        int photoRows = getManualVisiblePhotoCount(queueCount);
+        boolean thumbsLoading = false;
+        for (int i = 0; i < photoRows && i < thumbs.length; i++) {
+            Object tag = thumbs[i].getTag();
+            if (tag != null && thumbnailLoadsInFlight.contains(String.valueOf(tag))) {
+                thumbsLoading = true;
+                break;
+            }
+        }
+        setManualQueueSubtitle(queueCount, end, thumbsLoading);
     }
 
     private String queueDisplayName(ProcessingQueueManager.Entry entry) {
