@@ -1,10 +1,14 @@
 package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.hardware.Camera;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
 import android.text.Html;
 import android.view.Gravity;
 import android.view.View;
@@ -15,6 +19,8 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -36,6 +42,21 @@ public class MenuController {
     public static final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
     private static final int PROCESSING_FREQUENCY_MANUAL = -1;
     private static final int MANUAL_QUEUE_PAGE_SIZE = 5;
+    private static final int MANUAL_QUEUE_THUMB_WIDTH = 192;
+    private static final int MANUAL_QUEUE_THUMB_HEIGHT = 108;
+    private static final int MANUAL_QUEUE_THUMB_CACHE_LIMIT = 24;
+    private static final String[] CUSTOM_BUTTON_LABELS = {
+            "OFF",
+            "ISO MENU",
+            "FOCUS MAGNIFIER",
+            "TOGGLE FOCUS METER",
+            "CYCLE CREATIVE MODES",
+            "TOGGLE GRID LINES",
+            "SHUTTER SPEED",
+            "APERTURE",
+            "EXPOSURE COMP"
+    };
+    private static final int CUSTOM_BUTTON_ACTION_MAX = CUSTOM_BUTTON_LABELS.length - 1;
 
     // --- NEW: Caches the physical files so their indexes match the menu ---
     public static java.util.List<File> grainTextureFiles = new java.util.ArrayList<File>();
@@ -125,6 +146,7 @@ public class MenuController {
         int     getProcessingFrequency();
         int     getQueuedPhotoCount();
         List<ProcessingQueueManager.Entry> getQueuedPhotoEntries();
+        ProcessingQueueManager.Entry getQueuedPhotoEntry(int index);
         String  getProcessingEstimateText(int photoCount);
 
         // Preferences — write
@@ -185,6 +207,12 @@ public class MenuController {
     private final LinearLayout   supportContainer;
 
     private final HostCallback host;
+    private final Handler mainHandler;
+    private final HandlerThread thumbnailThread;
+    private final Handler thumbnailHandler;
+    private final HashMap<String, Bitmap> thumbnailCache = new HashMap<String, Bitmap>();
+    private final HashSet<String> thumbnailLoadsInFlight = new HashSet<String>();
+    private final HashSet<String> thumbnailDecodeFailures = new HashSet<String>();
     private boolean manualQueueOpen = false;
     private boolean[] manualSelected = new boolean[0];
     private int manualQueueOffset = 0;
@@ -194,6 +222,10 @@ public class MenuController {
     // -----------------------------------------------------------------------
     public MenuController(Context ctx, FrameLayout rootLayout, HostCallback host) {
         this.host = host;
+        mainHandler = new Handler(Looper.getMainLooper());
+        thumbnailThread = new HandlerThread("ManualQueueThumbs");
+        thumbnailThread.start();
+        thumbnailHandler = new Handler(thumbnailThread.getLooper());
 
         container = new LinearLayout(ctx);
         container.setOrientation(LinearLayout.VERTICAL);
@@ -564,6 +596,7 @@ public class MenuController {
             manualSelected = new boolean[0];
             manualQueueOffset = 0;
             selection = 0;
+            clearThumbnailCache();
             render();
             return true;
         }
@@ -750,11 +783,11 @@ public class MenuController {
             else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
             else if (sel == 5) host.setProcessingFrequency(nextProcessingFrequency(host.getProcessingFrequency(), dir));
         } else if (currentPage == 7) {
-            if      (sel == 0) rm.setPrefC1(Math.max(0, Math.min(5, rm.getPrefC1() + dir)));
-            else if (sel == 1) rm.setPrefC2(Math.max(0, Math.min(5, rm.getPrefC2() + dir)));
-            else if (sel == 2) rm.setPrefC3(Math.max(0, Math.min(5, rm.getPrefC3() + dir)));
-            else if (sel == 3) rm.setPrefAel(Math.max(0, Math.min(5, rm.getPrefAel() + dir)));
-            else if (sel == 4) rm.setPrefFn(Math.max(0, Math.min(5, rm.getPrefFn() + dir)));
+            if      (sel == 0) rm.setPrefC1(clampCustomButtonAction(rm.getPrefC1() + dir));
+            else if (sel == 1) rm.setPrefC2(clampCustomButtonAction(rm.getPrefC2() + dir));
+            else if (sel == 2) rm.setPrefC3(clampCustomButtonAction(rm.getPrefC3() + dir));
+            else if (sel == 3) rm.setPrefAel(clampCustomButtonAction(rm.getPrefAel() + dir));
+            else if (sel == 4) rm.setPrefFn(clampCustomButtonAction(rm.getPrefFn() + dir));
         }
 
         render();
@@ -769,6 +802,14 @@ public class MenuController {
         if (idx == 2) return 5;
         if (idx == 3) return PROCESSING_FREQUENCY_MANUAL;
         return 1;
+    }
+
+    private int clampCustomButtonAction(int action) {
+        return Math.max(0, Math.min(CUSTOM_BUTTON_ACTION_MAX, action));
+    }
+
+    private String customButtonLabel(int action) {
+        return CUSTOM_BUTTON_LABELS[clampCustomButtonAction(action)];
     }
 
     private void handleConnectionAction() {
@@ -816,6 +857,7 @@ public class MenuController {
             rows[i].setVisibility(View.GONE);
             thumbs[i].setVisibility(View.GONE);
             thumbs[i].setImageBitmap(null);
+            thumbs[i].setTag(null);
         }
         supportContainer.setVisibility(View.GONE);
 
@@ -920,12 +962,11 @@ public class MenuController {
                     freq == PROCESSING_FREQUENCY_MANUAL ? (queueCount + " WAITING") : (queueCount > 0 ? (queueCount + " WAITING") : "EMPTY"));
         } else if (currentPage == 7) {
             ic = 5;
-            String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "CYCLE CREATIVE MODES", "TOGGLE GRID LINES"};
-            setRow(0, "Custom 1 (C1)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC1()))]);
-            setRow(1, "Custom 2 (C2)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC2()))]);
-            setRow(2, "Custom 3 (C3)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC3()))]);
-            setRow(3, "AEL Button",    btnLbls[Math.max(0, Math.min(5, rm.getPrefAel()))]);
-            setRow(4, "FN Button",     btnLbls[Math.max(0, Math.min(5, rm.getPrefFn()))]);
+            setRow(0, "Custom 1 (C1)", customButtonLabel(rm.getPrefC1()));
+            setRow(1, "Custom 2 (C2)", customButtonLabel(rm.getPrefC2()));
+            setRow(2, "Custom 3 (C3)", customButtonLabel(rm.getPrefC3()));
+            setRow(3, "AEL Button",    customButtonLabel(rm.getPrefAel()));
+            setRow(4, "FN Button",     customButtonLabel(rm.getPrefFn()));
         } else if (currentPage == 8) {
             ic = 3;
             setRow(0, "Camera Hotspot", hotspotStatus);
@@ -938,25 +979,29 @@ public class MenuController {
     }
 
     private void renderManualQueue(int orange) {
-        List<ProcessingQueueManager.Entry> entries = host.getQueuedPhotoEntries();
-        int queueCount = entries != null ? entries.size() : 0;
+        int queueCount = host.getQueuedPhotoCount();
         ensureManualSelectionSize(queueCount);
         if (manualQueueOffset >= queueCount) manualQueueOffset = Math.max(0, queueCount - MANUAL_QUEUE_PAGE_SIZE);
 
         int end = Math.min(queueCount, manualQueueOffset + MANUAL_QUEUE_PAGE_SIZE);
-        if (queueCount > 0) {
-            tvSubtitle.setText("Manual Queue " + (manualQueueOffset + 1) + "-" + end + "/" + queueCount);
-        } else {
-            tvSubtitle.setText("Manual Queue (EMPTY)");
-        }
         tvSubtitle.setBackgroundColor(Color.TRANSPARENT);
 
         int row = 0;
+        boolean thumbsLoading = false;
         for (int i = manualQueueOffset; i < end; i++) {
-            ProcessingQueueManager.Entry entry = entries.get(i);
+            ProcessingQueueManager.Entry entry = host.getQueuedPhotoEntry(i);
             String marker = i < manualSelected.length && manualSelected[i] ? "[X] " : "[ ] ";
-            setQueueRow(row, marker + queueDisplayName(entry), queueRecipeName(entry), entry.originalPath);
+            String imagePath = entry != null ? entry.originalPath : null;
+            if (setQueueRow(row, marker + queueDisplayName(entry), queueRecipeName(entry), imagePath)) {
+                thumbsLoading = true;
+            }
             row++;
+        }
+        if (queueCount > 0) {
+            tvSubtitle.setText("Manual Queue " + (manualQueueOffset + 1) + "-" + end + "/" + queueCount
+                    + (thumbsLoading ? " | LOADING" : ""));
+        } else {
+            tvSubtitle.setText("Manual Queue (EMPTY)");
         }
         if (queueCount == 0) {
             setRow(row++, "No Queued Photos", "");
@@ -997,19 +1042,95 @@ public class MenuController {
         values[i].setText(value);
         thumbs[i].setVisibility(View.GONE);
         thumbs[i].setImageBitmap(null);
+        thumbs[i].setTag(null);
         rows[i].setVisibility(View.VISIBLE);
     }
 
-    private void setQueueRow(int i, String label, String value, String imagePath) {
+    private boolean setQueueRow(int i, String label, String value, String imagePath) {
         setRow(i, label, value);
         thumbs[i].setVisibility(View.VISIBLE);
-        try {
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = 32;
-            thumbs[i].setImageBitmap(BitmapFactory.decodeFile(imagePath, opts));
-        } catch (Exception ignored) {
-            thumbs[i].setImageBitmap(null);
+        if (imagePath == null || imagePath.length() == 0) return false;
+
+        String cacheKey = getThumbnailCacheKey(imagePath);
+        thumbs[i].setTag(cacheKey);
+        Bitmap cached = thumbnailCache.get(cacheKey);
+        if (cached != null && !cached.isRecycled()) {
+            thumbs[i].setImageBitmap(cached);
+            return false;
         }
+        if (thumbnailDecodeFailures.contains(cacheKey)) return false;
+
+        requestQueueThumbnail(i, imagePath, cacheKey);
+        return true;
+    }
+
+    private String getThumbnailCacheKey(String imagePath) {
+        File f = new File(imagePath);
+        return imagePath + "|" + f.length() + "|" + f.lastModified();
+    }
+
+    private void requestQueueThumbnail(final int row, final String imagePath, final String cacheKey) {
+        if (thumbnailLoadsInFlight.contains(cacheKey)) return;
+        thumbnailLoadsInFlight.add(cacheKey);
+        thumbnailHandler.post(new Runnable() {
+            @Override public void run() {
+                final Bitmap bitmap = decodeQueueThumbnail(imagePath);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        thumbnailLoadsInFlight.remove(cacheKey);
+                        if (bitmap != null) {
+                            putThumbnailCache(cacheKey, bitmap);
+                        } else {
+                            thumbnailDecodeFailures.add(cacheKey);
+                        }
+
+                        if (manualQueueOpen && row >= 0 && row < thumbs.length && cacheKey.equals(thumbs[row].getTag())) {
+                            if (bitmap != null) thumbs[row].setImageBitmap(bitmap);
+                            render();
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private Bitmap decodeQueueThumbnail(String imagePath) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(imagePath, bounds);
+
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = calculateThumbnailSample(bounds.outWidth, bounds.outHeight);
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            opts.inDither = true;
+            return BitmapFactory.decodeFile(imagePath, opts);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private int calculateThumbnailSample(int width, int height) {
+        if (width <= 0 || height <= 0) return 8;
+        int sample = 1;
+        while ((width / sample) > MANUAL_QUEUE_THUMB_WIDTH * 2 || (height / sample) > MANUAL_QUEUE_THUMB_HEIGHT * 2) {
+            sample *= 2;
+        }
+        return Math.max(1, sample);
+    }
+
+    private void putThumbnailCache(String cacheKey, Bitmap bitmap) {
+        if (thumbnailCache.size() >= MANUAL_QUEUE_THUMB_CACHE_LIMIT) {
+            thumbnailCache.clear();
+            thumbnailDecodeFailures.clear();
+        }
+        thumbnailCache.put(cacheKey, bitmap);
+    }
+
+    private void clearThumbnailCache() {
+        thumbnailCache.clear();
+        thumbnailLoadsInFlight.clear();
+        thumbnailDecodeFailures.clear();
     }
 
     private String queueDisplayName(ProcessingQueueManager.Entry entry) {

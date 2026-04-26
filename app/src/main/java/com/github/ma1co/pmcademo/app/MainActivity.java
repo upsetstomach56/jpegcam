@@ -481,7 +481,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return "PROCESSING QUEUE " + current + "/" + processingQueueTotal
                     + "\n" + formatQueueEta(current);
         }
-        return "PROCESSING...";
+        return "PROCESSING...\n" + formatProcessingEstimateForCount(1) + " LEFT";
     }
 
     private String formatQueueEta(int current) {
@@ -498,9 +498,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         long minutes = totalSeconds / 60;
         long seconds = totalSeconds % 60;
         if (minutes > 0) {
-            return "~" + minutes + "M " + seconds + "S";
+            if (seconds > 0) return "~" + minutes + " min " + seconds + " sec";
+            return "~" + minutes + " min";
         }
-        return "~" + seconds + "S";
+        return "~" + seconds + " sec";
     }
 
     private void maybeAutoProcessQueuedPhotos() {
@@ -1160,6 +1161,18 @@ public void onEnterPressed() {
         } else if (action == 5) { // TOGGLE GRID LINES
             setPrefGridLines(!isPrefGridLines());
             saveAppPreferences();
+            updateMainHUD();
+            return true;
+        } else if (action == 6) { // SHUTTER SPEED
+            mDialMode = DIAL_MODE_SHUTTER;
+            updateMainHUD();
+            return true;
+        } else if (action == 7) { // APERTURE
+            mDialMode = DIAL_MODE_APERTURE;
+            updateMainHUD();
+            return true;
+        } else if (action == 8) { // EXPOSURE COMP
+            mDialMode = DIAL_MODE_EXPOSURE;
             updateMainHUD();
             return true;
         }
@@ -2180,6 +2193,10 @@ public void onEnterPressed() {
     @Override public List<ProcessingQueueManager.Entry> getQueuedPhotoEntries() {
         if (processingQueueManager == null) return new ArrayList<ProcessingQueueManager.Entry>();
         return processingQueueManager.getEntries();
+    }
+    @Override public ProcessingQueueManager.Entry getQueuedPhotoEntry(int index) {
+        if (processingQueueManager == null) return null;
+        return processingQueueManager.getEntry(index);
     }
     @Override public String getProcessingEstimateText(int photoCount) {
         return formatProcessingEstimateForCount(photoCount);

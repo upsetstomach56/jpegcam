@@ -53,6 +53,11 @@ public class ProcessingQueueManager {
         return copy;
     }
 
+    public synchronized Entry getEntry(int index) {
+        if (index < 0 || index >= entries.size()) return null;
+        return copyEntry(entries.get(index));
+    }
+
     public synchronized void add(Entry entry) {
         if (entry == null || entry.originalPath == null || entry.originalPath.length() == 0) return;
         entries.add(copyEntry(entry));
